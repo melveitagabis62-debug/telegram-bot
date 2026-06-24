@@ -82,7 +82,7 @@ def generate_signal():
 
     if trend == "UP" and rsi < 35:
         return "BUY"
-    elif trend == "DOWN" and rsi > 65:
+    if trend == "DOWN" and rsi > 65:
         return "SELL"
 
     return "HOLD"
@@ -100,8 +100,9 @@ async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== START BOT =====
 def main():
     async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    result = generate_signal()
-    await update.message.reply_text(f"Signal: {result}")
+        result = generate_signal()
+        await 
+    update.message.reply_text(f"Signal: {result}")
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("signal", signal))
