@@ -87,3 +87,17 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+from telegram.ext import CommandHandler, ContextTypes
+
+# ===== TELEGRAM COMMAND =====
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Bot is working!")
+
+# ===== MAIN =====
+app = ApplicationBuilder().token(TOKEN).build()
+
+app.add_handler(CommandHandler("start", start))
+
+print("Bot started...")
+app.run_polling()
