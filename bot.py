@@ -1,8 +1,6 @@
-import pandas as pd
-import pandas_ta as ta
-import yfinance as yf
+import logging
 import asyncio
-import os
+import random
 from datetime import datetime
 
 from telegram import Update
@@ -12,212 +10,128 @@ from telegram.ext import (
     ContextTypes
 )
 
-# 🔐 Use Railway environment variable
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# ===== CONFIG =====
+TOKEN = "YOUR_BOT_TOKEN_HERE"
 
-MANUAL_MODE = True
-ACTIVE_CHATS = set()
+PAIRS = ["EURUSD", "GBPUSD", "USDJPY"]
+AUTO_MODE = False
 
-# =============================
-# 🔍 MARKET SESSION FILTER
-# =============================
-def is_trading_session():
-    now = datetime.utcnow().hour
-    return 7 <= now <= 20
+# ===== LOGGING =====
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
 
+# ===== INDICATOR SIMULATION (Replace later with real data) =====
+def generate_signal(pair):
+    trend = random.choice(["UP", "DOWN"])
+    rsi = random.randint(10, 90)
+    macd = random.choice(["BUY", "SELL"])
 
-# =============================
-# 📊 SUPPORT / RESISTANCE
-# =============================
-def get_sr_levels(data):
-    recent = data.tail(50)
-    support = recent["Low"].min()
-    resistance = recent["High"].max()
-    return support, resistance
+    if trend == "UP" and rsi < 35 and macd == "BUY":
+        return "BUY", random.randint(70, 85)
+    elif trend == "DOWN" and rsi > 65 and macd == "SELL":
+        return "SELL", random.randint(70, 85)
 
-
-# =============================
-# 🧠 ANALYSIS ENGINE
-# =============================
-def analyze_pair(symbol):
-    try:
-        m15 = yf.download(symbol, interval="15m", period="5d", progress=False)
-        h1 = yf.download(symbol, interval="1h", period="10d", progress=False)
-
-        if len(m15) < 100 or len(h1) < 100:
-            return None
-
-        m15["EMA20"] = ta.ema(m15["Close"], length=20)
-        m15["EMA50"] = ta.ema(m15["Close"], length=50)
-        m15["RSI"] = ta.rsi(m15["Close"], length=14)
-
-        h1["EMA50"] = ta.ema(h1["Close"], length=50)
-        h1["EMA200"] = ta.ema(h1["Close"], length=200)
-
-        latest = m15.iloc[-1]
-        prev = m15.iloc[-2]
-        h1_latest = h1.iloc[-1]
-
-        trend = None
-        if h1_latest["EMA50"] > h1_latest["EMA200"]:
-            trend = "BULL"
-        elif h1_latest["EMA50"] < h1_latest["EMA200"]:
-            trend = "BEAR"
-
-        bullish_cross = prev["EMA20"] < prev["EMA50"] and latest["EMA20"] > latest["EMA50"]
-        bearish_cross = prev["EMA20"] > prev["EMA50"] and latest["EMA20"] < latest["EMA50"]
-
-        support, resistance = get_sr_levels(m15)
-        price = latest["Close"]
-
-        near_support = abs(price - support) / price < 0.002
-        near_resistance = abs(price - resistance) / price < 0.002
-
-        score = 0
-        direction = None
-
-        if trend == "BULL":
-            score += 1
-        if bullish_cross:
-            score += 1
-        if latest["RSI"] > 55:
-            score += 1
-        if near_support:
-            score += 1
-
-        if score >= 3:
-            direction = "CALL"
-
-        score_put = 0
-
-        if trend == "BEAR":
-            score_put += 1
-        if bearish_cross:
-            score_put += 1
-        if latest["RSI"] < 45:
-            score_put += 1
-        if near_resistance:
-            score_put += 1
-
-        if score_put >= 3:
-            direction = "PUT"
-            score = score_put
-
-        if direction is None:
-            return None
-
-        confidence = "LOW"
-        if score == 3:
-            confidence = "MEDIUM"
-        elif score >= 4:
-            confidence = "HIGH"
-
-        return {
-            "direction": direction,
-            "confidence": confidence,
-            "price": round(price, 5)
-        }
-
-    except Exception:
-        return None
+    return None, 0
 
 
-# =============================
-# 📤 FORMAT MESSAGE
-# =============================
-def format_signal(pair, data):
-    return (
-        f"📊 {pair}\n"
-        f"Direction: {data['direction']}\n"
-        f"Confidence: {data['confidence']}\n"
-        f"Entry: {data['price']}\n"
-        f"Expiry: 15 min\n"
-        f"---------------------\n"
-    )
+# ===== SIGNAL FORMAT =====
+def format_signal(pair, signal, confidence):
+    entry = round(random.uniform(1.0700, 1.1000), 4)
+    tp = round(entry + 0.0020, 4)
+    sl = round(entry - 0.0020, 4)
+
+    return f"""
+📊 {pair} (M5)
+
+{"🟢 BUY" if signal == "BUY" else "🔴 SELL"}
+
+📍 Entry: {entry}
+🎯 TP: {tp}
+🛑 SL: {sl}
+
+⚡ Confidence: {confidence}%
+🕒 {datetime.now().strftime('%H:%M:%S')}
+"""
 
 
-# =============================
-# 🤖 AUTO SIGNAL LOOP
-# =============================
-async def send_signals(context: ContextTypes.DEFAULT_TYPE):
-    global MANUAL_MODE
+# ===== COMMANDS =====
 
-    if MANUAL_MODE:
-        return
-
-    if not is_trading_session():
-        return
-
-    pairs = {
-        "EURUSD": "EURUSD=X",
-        "GBPUSD": "GBPUSD=X",
-        "USDJPY": "JPY=X"
-    }
-
-    msg = "🤖 AUTO SIGNALS\n\n"
-
-    for pair, ticker in pairs.items():
-        result = await asyncio.to_thread(analyze_pair, ticker)
-
-        if result:
-            msg += format_signal(pair, result)
-
-    if msg.strip() == "🤖 AUTO SIGNALS":
-        return
-
-    for chat_id in ACTIVE_CHATS:
-        await context.bot.send_message(chat_id=chat_id, text=msg)
-
-
-# =============================
-# 📩 COMMANDS
-# =============================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    ACTIVE_CHATS.add(chat_id)
-    await update.message.reply_text("✅ Bot Activated")
+    await update.message.reply_text("✅ Bot Activated (PRO MODE)")
 
 
 async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    pairs = {
-        "EURUSD": "EURUSD=X",
-        "GBPUSD": "GBPUSD=X",
-        "USDJPY": "JPY=X"
-    }
+    messages = []
 
-    msg = "📊 MANUAL SIGNALS\n\n"
+    for pair in PAIRS:
+        sig, conf = generate_signal(pair)
+        if sig:
+            messages.append(format_signal(pair, sig, conf))
 
-    for pair, ticker in pairs.items():
-        result = await asyncio.to_thread(analyze_pair, ticker)
-
-        if result:
-            msg += format_signal(pair, result)
-
-    await update.message.reply_text(msg)
+    if messages:
+        await update.message.reply_text("\n\n".join(messages))
+    else:
+        await update.message.reply_text("⚠️ No strong signals right now")
 
 
-async def manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global MANUAL_MODE
-    MANUAL_MODE = True
-    await update.message.reply_text("🛑 Manual Mode")
+async def auto_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global AUTO_MODE
+    AUTO_MODE = True
+    await update.message.reply_text("🤖 Auto signals ON")
 
 
-async def auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global MANUAL_MODE
-    MANUAL_MODE = False
-    await update.message.reply_text("🤖 Auto Mode Enabled")
+async def auto_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global AUTO_MODE
+    AUTO_MODE = False
+    await update.message.reply_text("🛑 Auto signals OFF")
 
 
-# =============================
-# 🚀 RUN BOT
-# =============================
-app = ApplicationBuilder().token(BOT_TOKEN).build()
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    mode = "ON" if AUTO_MODE else "OFF"
+    await update.message.reply_text(f"📡 Auto Mode: {mode}")
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("signal", signal))
-app.add_handler(CommandHandler("manual", manual))
-app.add_handler(CommandHandler("auto", auto))
 
-app.job_queue.run_repeating(send_signals, interval=300, first=10)
+# ===== AUTO SIGNAL LOOP =====
 
-app.run_polling(drop_pending_updates=True)
+async def auto_signals(app):
+    while True:
+        if AUTO_MODE:
+            for pair in PAIRS:
+                sig, conf = generate_signal(pair)
+                if sig and conf >= 75:
+                    msg = format_signal(pair, sig, conf)
+
+                    for chat_id in app.chat_data.keys():
+                        try:
+                            await app.bot.send_message(chat_id=chat_id, text=msg)
+                        except:
+                            pass
+
+        await asyncio.sleep(60)
+
+
+# ===== MAIN =====
+
+async def main():
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    # handlers
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("signal", signal))
+    app.add_handler(CommandHandler("auto_on", auto_on))
+    app.add_handler(CommandHandler("auto_off", auto_off))
+    app.add_handler(CommandHandler("status", status))
+
+    # ✅ start background task BEFORE polling
+    asyncio.create_task(auto_signals(app))
+
+    print("🚀 Bot running...")
+
+    # ✅ run bot
+    await app.run_polling()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
