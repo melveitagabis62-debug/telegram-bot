@@ -20,9 +20,17 @@ def main_menu():
 
 def forex_menu():
     keyboard = [
-        [InlineKeyboardButton("EUR/USD", callback_data="EURUSD"),
-         InlineKeyboardButton("GBP/USD", callback_data="GBPUSD")],
-        [InlineKeyboardButton("USD/JPY", callback_data="USDJPY")]
+        [InlineKeyboardButton("EUR/USD", callback_data="EURUSD")],
+        [InlineKeyboardButton("GBP/USD", callback_data="GBPUSD")],
+        [InlineKeyboardButton("USD/JPY", callback_data="USDJPY")],
+
+        # 🔥 ADD THESE
+        [InlineKeyboardButton("AUD/USD", callback_data="AUDUSD")],
+        [InlineKeyboardButton("USD/CAD", callback_data="USDCAD")],
+        [InlineKeyboardButton("USD/CHF", callback_data="USDCHF")],
+        [InlineKeyboardButton("NZD/USD", callback_data="NZDUSD")],
+        [InlineKeyboardButton("EUR/JPY", callback_data="EURJPY")],
+        [InlineKeyboardButton("GBP/JPY", callback_data="GBPJPY")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
