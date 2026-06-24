@@ -113,7 +113,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "forex":
         await query.edit_message_text("Select Pair:", reply_markup=forex_menu())
 
-    elif data in ["EURUSD", "GBPUSD", "USDJPY"]:
+    elif data in ["EURUSD", "GBPUSD", "USDJPY", "USDCHF",
+    "AUDUSD", "USDCAD", "NZDUSD",
+    "EURGBP", "EURJPY", "GBPJPY",
+    "EURCHF", "AUDJPY", "GBPCHF"
+                 ]:
         await query.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu(data))
 
     elif "_" in data:
