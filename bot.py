@@ -220,4 +220,4 @@ app.add_handler(CommandHandler("auto", auto))
 
 app.job_queue.run_repeating(send_signals, interval=300, first=10)
 
-app.run_polling()
+app.run_polling(drop_pending_updates=True)
