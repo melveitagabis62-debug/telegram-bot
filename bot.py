@@ -11,8 +11,8 @@ from telegram.ext import (
     ContextTypes
 )
 
-BOT_TOKEN = "8705873001:AAEIMShBc-7o6IBc_igfeszp6E9IUS32lOc"
-
+import os
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 MANUAL_MODE = True
 LAST_SIGNAL_TIME = {}
 
