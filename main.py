@@ -88,7 +88,10 @@ def generate_signal():
     return "HOLD"
 
 # ===== TELEGRAM COMMAND =====
-async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Bot is working!")
+
+async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):    
     result = generate_signal()
 
     await update.message.reply_text(
@@ -98,40 +101,12 @@ async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ===== START BOT =====
-def main():
-    async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    result = generate_signal()
 
-    await update.message.reply_text(
-        f"📊 Pair: {PAIR}\n"
-        f"⏱ Timeframe: {TIMEFRAME}\n\n"
-        f"📢 Signal: {result}"
-    )
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("signal", signal))
-
-    print("Bot running...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
-
-from telegram.ext import CommandHandler, ContextTypes
-
-# ===== TELEGRAM COMMAND =====
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot is working!")
-
-async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    result = generate_signal()
-    await update.message.reply_text(f"Signal: {result}")
-
-# ===== APP =====
-app = ApplicationBuilder().token(TOKEN).build()
+app = ApplicationBuilder().token(TOKEN).
+build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("signal", signal))
 
-print("Bot started...")
+print("Bot running...")
 app.run_polling()
