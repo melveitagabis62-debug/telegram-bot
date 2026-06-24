@@ -118,10 +118,15 @@ from telegram.ext import CommandHandler, ContextTypes
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Bot is working!")
 
-# ===== MAIN =====
+async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    result = generate_signal()
+    await update.message.reply_text(f"Signal: {result}")
+
+# ===== APP =====
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("signal", signal))
 
 print("Bot started...")
 app.run_polling()
