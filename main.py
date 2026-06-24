@@ -62,31 +62,21 @@ def calculate_indicators(df):
 
 # ===== SIGNAL LOGIC =====
 def generate_signal():
-    df = get_candles()
+    try:
+        # your data fetching here
+        if not data:
+            return "NO DATA"
 
-    # ✅ FIX 1: check if df is empty
-    if df is None or df.empty:
-        print("No data from API")
+        if trend == "UP" and rsi < 35:
+            return "BUY"
+        elif trend == "DOWN" and rsi > 65:
+            return "SELL"
+        else:
+            return "HOLD"
+
+    except Exception as e:
+        print("ERROR:", e)
         return "NO DATA"
-
-    df = calculate_indicators(df)
-
-    # ✅ FIX 2: safe check before iloc
-    if len(df) == 0:
-        return "NO DATA"
-
-    last = df.iloc[-1]
-
-    trend = "UP" if last["EMA50"] > last["EMA200"] else "DOWN"
-    rsi = last["RSI"]
-
-    if trend == "UP" and rsi < 35:
-        return "BUY"
-    if trend == "DOWN" and rsi > 65:
-        return "SELL"
-
-    return "HOLD"
-
 # ===== TELEGRAM COMMAND =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Bot is working!")
