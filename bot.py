@@ -114,7 +114,7 @@ async def auto_signals(app):
 
 # ===== MAIN =====
 
-async def main():
+def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     # handlers
@@ -124,17 +124,18 @@ async def main():
     app.add_handler(CommandHandler("auto_off", auto_off))
     app.add_handler(CommandHandler("status", status))
 
-    # ✅ start background task BEFORE polling
-    asyncio.create_task(auto_signals(app))
-
     print("🚀 Bot running...")
 
-    # ✅ run bot
-    await app.run_polling()
+    # ✅ proper background task (NO asyncio.create_task)
+    app.job_queue.run_repeating(
+        lambda ctx: ctx.application.create_task(auto_signals(ctx.application)),
+        interval=60,
+        first=10,
+    )
+
+    # ✅ correct run
+    app.run_polling()
 
 
 if __name__ == "__main__":
-    import asyncio
-    loop = asyncio.get_event_loop()
-  
-    loop.run_until_complete(main())
+    main()
