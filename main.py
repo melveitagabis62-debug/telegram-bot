@@ -1,101 +1,133 @@
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+
+from tradingview_ta import TA_Handler, Interval
 import logging
-import requests
-import pandas as pd
 
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+TOKEN = "YOUR_BOT_TOKEN"
 
-# ===== CONFIG =====
-import os
+# ================= MENU =================
 
-TOKEN = os.getenv("BOT_TOKEN")
+def main_menu():
+    keyboard = [
+        [InlineKeyboardButton("📊 Forex", callback_data="forex")],
+        [InlineKeyboardButton("💰 Crypto", callback_data="crypto")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
-PAIR = "EURUSD"
-TIMEFRAME = "5m"
 
-# ===== LOGGING =====
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
+def forex_menu():
+    keyboard = [
+        [InlineKeyboardButton("EUR/USD", callback_data="EURUSD"),
+         InlineKeyboardButton("GBP/USD", callback_data="GBPUSD")],
+        [InlineKeyboardButton("USD/JPY", callback_data="USDJPY")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
-# ===== FETCH DATA (FREE API) =====
-def get_candles():
-    url = f"https://api.binance.com/api/v3/klines?symbol={PAIR}&interval={TIMEFRAME}&limit=50"
-    
-    response = requests.get(url)
-    data = response.json()
 
-    # ✅ FIX: check bad response
-    if not isinstance(data, list):
-        print("API error:", data)
-        return None
+def timeframe_menu(pair):
+    keyboard = [
+        [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"),
+         InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
+        [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
-    df = pd.DataFrame(data, columns=[
-        "time","open","high","low","close","volume",
-        "close_time","qav","trades","tbav","tqav","ignore"
-    ])
+# ================= SIGNAL =================
 
-    if df.empty:
-        return None
+def get_analysis(symbol, interval):
+    handler = TA_Handler(
+        symbol=symbol,
+        screener="forex",
+        exchange="FX_IDC",
+        interval=interval
+    )
 
-    df["close"] = df["close"].astype(float)
+    analysis = handler.get_analysis()
+    return analysis
 
-    return df
 
-# ===== INDICATORS =====
-def calculate_indicators(df):
-    df["EMA50"] = df["close"].ewm(span=50).mean()
-    df["EMA200"] = df["close"].ewm(span=200).mean()
-
-    delta = df["close"].diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-
-    avg_gain = gain.rolling(14).mean()
-    avg_loss = loss.rolling(14).mean()
-
-    rs = avg_gain / avg_loss
-    df["RSI"] = 100 - (100 / (1 + rs))
-
-    return df
-
-# ===== SIGNAL LOGIC =====
-def generate_signal():
+def generate_signal(pair, timeframe):
     try:
-        # your data fetching here
-        if not data:
-            return "NO DATA"
+        interval_map = {
+            "1m": Interval.INTERVAL_1_MINUTE,
+            "5m": Interval.INTERVAL_5_MINUTES,
+            "15m": Interval.INTERVAL_15_MINUTES
+        }
 
-        if trend == "UP" and rsi < 35:
-            return "BUY"
-        elif trend == "DOWN" and rsi > 65:
-            return "SELL"
+        analysis = get_analysis(pair, interval_map[timeframe])
+
+        rsi = analysis.indicators["RSI"]
+        macd = analysis.indicators["MACD.macd"]
+        ema = analysis.indicators["EMA20"]
+
+        signal = "HOLD"
+
+        # 🔥 Improved logic
+        if rsi < 30 and macd > 0:
+            signal = "BUY"
+        elif rsi > 70 and macd < 0:
+            signal = "SELL"
+        elif ema < analysis.indicators["close"]:
+            signal = "BUY"
         else:
-            return "HOLD"
+            signal = "SELL"
+
+        return f"""
+📊 Sigma AI Trade
+
+💱 Pair: {pair}
+⏱ Timeframe: {timeframe}
+
+📈 Signal: {signal}
+
+🧠 Indicators:
+RSI: {round(rsi,2)}
+MACD: {round(macd,2)}
+EMA20: {round(ema,2)}
+
+⚡ Powered by TradingView
+"""
 
     except Exception as e:
         print("ERROR:", e)
-        return "NO DATA"
-# ===== TELEGRAM COMMAND =====
+        return "❌ Failed to fetch data"
+
+# ================= HANDLERS =================
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot is working!")
-
-async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):    
-    result = generate_signal()
-
     await update.message.reply_text(
-        f"📊 Pair: {PAIR}\n"
-        f"⏱ Timeframe: {TIMEFRAME}\n\n"
-        f"📢 Signal: {result}"
+        "🚀 Welcome to Sigma AI Bot",
+        reply_markup=main_menu()
     )
 
-# ===== START BOT =====
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+
+    if data == "forex":
+        await query.edit_message_text("Select Pair:", reply_markup=forex_menu())
+
+    elif data in ["EURUSD", "GBPUSD", "USDJPY"]:
+        await query.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu(data))
+
+    elif "_" in data:
+        pair, tf = data.split("_")
+
+        result = generate_signal(pair, tf)
+
+        await query.edit_message_text(result)
+
+
+# ================= RUN =================
 
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("signal", signal))
+app.add_handler(CallbackQueryHandler(button_handler))
 
 print("Bot running...")
 app.run_polling()
