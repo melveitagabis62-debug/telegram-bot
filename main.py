@@ -21,15 +21,26 @@ logging.basicConfig(
 
 # ===== FETCH DATA (FREE API) =====
 def get_candles():
-    url = f"https://api.binance.com/api/v3/klines?symbol=EURUSDT&interval=5m&limit=100"
-    data = requests.get(url).json()
+    url = f"https://api.binance.com/api/v3/klines?symbol={PAIR}&interval={TIMEFRAME}&limit=50"
+    
+    response = requests.get(url)
+    data = response.json()
+
+    # ✅ FIX: check bad response
+    if not isinstance(data, list):
+        print("API error:", data)
+        return None
 
     df = pd.DataFrame(data, columns=[
         "time","open","high","low","close","volume",
         "close_time","qav","trades","tbav","tqav","ignore"
     ])
 
+    if df.empty:
+        return None
+
     df["close"] = df["close"].astype(float)
+
     return df
 
 # ===== INDICATORS =====
@@ -52,7 +63,17 @@ def calculate_indicators(df):
 # ===== SIGNAL LOGIC =====
 def generate_signal():
     df = get_candles()
+
+    # ✅ FIX 1: check if df is empty
+    if df is None or df.empty:
+        print("No data from API")
+        return "NO DATA"
+
     df = calculate_indicators(df)
+
+    # ✅ FIX 2: safe check before iloc
+    if len(df) == 0:
+        return "NO DATA"
 
     last = df.iloc[-1]
 
@@ -63,8 +84,8 @@ def generate_signal():
         return "BUY"
     elif trend == "DOWN" and rsi > 65:
         return "SELL"
-    else:
-        return "WAIT"
+
+    return "HOLD"
 
 # ===== TELEGRAM COMMAND =====
 async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
