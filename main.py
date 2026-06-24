@@ -65,6 +65,14 @@ def generate_signal(pair, timeframe):
             "15m": Interval.INTERVAL_15_MINUTES
         }
 
+        expiration_map = {
+            "1m": "1-2 min",
+            "5m": "3-5 min",
+            "15m": "10-15 min"
+        }
+
+expiration = expiration_map.get(timeframe, "N/A")
+
         analysis = get_analysis(pair, interval_map[timeframe])
 
         rsi = analysis.indicators["RSI"]
