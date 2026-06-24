@@ -2,7 +2,8 @@ import pandas as pd
 import pandas_ta as ta
 import yfinance as yf
 import asyncio
-from datetime import datetime, timezone
+import os
+from datetime import datetime
 
 from telegram import Update
 from telegram.ext import (
@@ -11,17 +12,18 @@ from telegram.ext import (
     ContextTypes
 )
 
-import os
+# 🔐 Use Railway environment variable
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
 MANUAL_MODE = True
-LAST_SIGNAL_TIME = {}
+ACTIVE_CHATS = set()
 
 # =============================
 # 🔍 MARKET SESSION FILTER
 # =============================
 def is_trading_session():
     now = datetime.utcnow().hour
-    return 7 <= now <= 20  # London + NY
+    return 7 <= now <= 20
 
 
 # =============================
@@ -39,60 +41,41 @@ def get_sr_levels(data):
 # =============================
 def analyze_pair(symbol):
     try:
-        # M15 data
         m15 = yf.download(symbol, interval="15m", period="5d", progress=False)
-
-        # H1 data
         h1 = yf.download(symbol, interval="1h", period="10d", progress=False)
 
         if len(m15) < 100 or len(h1) < 100:
             return None
 
-        # Indicators M15
         m15["EMA20"] = ta.ema(m15["Close"], length=20)
         m15["EMA50"] = ta.ema(m15["Close"], length=50)
         m15["RSI"] = ta.rsi(m15["Close"], length=14)
 
-        # Indicators H1
         h1["EMA50"] = ta.ema(h1["Close"], length=50)
         h1["EMA200"] = ta.ema(h1["Close"], length=200)
 
         latest = m15.iloc[-1]
         prev = m15.iloc[-2]
-
         h1_latest = h1.iloc[-1]
 
-        # =============================
-        # TREND FILTER
-        # =============================
         trend = None
         if h1_latest["EMA50"] > h1_latest["EMA200"]:
             trend = "BULL"
         elif h1_latest["EMA50"] < h1_latest["EMA200"]:
             trend = "BEAR"
 
-        # =============================
-        # CROSSOVER
-        # =============================
         bullish_cross = prev["EMA20"] < prev["EMA50"] and latest["EMA20"] > latest["EMA50"]
         bearish_cross = prev["EMA20"] > prev["EMA50"] and latest["EMA20"] < latest["EMA50"]
 
-        # =============================
-        # SUPPORT / RESISTANCE
-        # =============================
         support, resistance = get_sr_levels(m15)
         price = latest["Close"]
 
         near_support = abs(price - support) / price < 0.002
         near_resistance = abs(price - resistance) / price < 0.002
 
-        # =============================
-        # SIGNAL SCORING
-        # =============================
         score = 0
         direction = None
 
-        # CALL conditions
         if trend == "BULL":
             score += 1
         if bullish_cross:
@@ -105,7 +88,6 @@ def analyze_pair(symbol):
         if score >= 3:
             direction = "CALL"
 
-        # PUT conditions
         score_put = 0
 
         if trend == "BEAR":
@@ -124,9 +106,6 @@ def analyze_pair(symbol):
         if direction is None:
             return None
 
-        # =============================
-        # CONFIDENCE
-        # =============================
         confidence = "LOW"
         if score == 3:
             confidence = "MEDIUM"
@@ -160,7 +139,7 @@ def format_signal(pair, data):
 # =============================
 # 🤖 AUTO SIGNAL LOOP
 # =============================
-async def send_signals(context):
+async def send_signals(context: ContextTypes.DEFAULT_TYPE):
     global MANUAL_MODE
 
     if MANUAL_MODE:
@@ -178,7 +157,7 @@ async def send_signals(context):
     msg = "🤖 AUTO SIGNALS\n\n"
 
     for pair, ticker in pairs.items():
-        result = analyze_pair(ticker)
+        result = await asyncio.to_thread(analyze_pair, ticker)
 
         if result:
             msg += format_signal(pair, result)
@@ -186,7 +165,7 @@ async def send_signals(context):
     if msg.strip() == "🤖 AUTO SIGNALS":
         return
 
-    for chat_id in context.application.chat_data:
+    for chat_id in ACTIVE_CHATS:
         await context.bot.send_message(chat_id=chat_id, text=msg)
 
 
@@ -195,7 +174,7 @@ async def send_signals(context):
 # =============================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    context.application.chat_data[chat_id] = True
+    ACTIVE_CHATS.add(chat_id)
     await update.message.reply_text("✅ Bot Activated")
 
 
@@ -209,7 +188,8 @@ async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = "📊 MANUAL SIGNALS\n\n"
 
     for pair, ticker in pairs.items():
-        result = analyze_pair(ticker)
+        result = await asyncio.to_thread(analyze_pair, ticker)
+
         if result:
             msg += format_signal(pair, result)
 
