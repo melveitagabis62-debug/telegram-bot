@@ -102,8 +102,7 @@ async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ===== START BOT =====
 
-app = ApplicationBuilder().token(TOKEN).
-build()
+app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("signal", signal))
