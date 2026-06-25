@@ -137,15 +137,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu(data))
                      
     elif data in ["1m", "5m", "15m"]:
-        
-        await query.message.reply_text(f"⏱ Timeframe selected: {data}")
-    
-    elif "_" in data:
-        pair, tf = data.split("_")
+    pair = context.user_data.get("pair")
 
-        result = generate_signal(pair, tf)
+    if not pair:
+        await query.message.reply_text("⚠️ Select pair first")
+        return
 
-        await query.edit_message_text(result)
+    result = generate_signal(pair, data)
+
+    await query.message.reply_text(result)
 
 
 # ================= RUN =================
