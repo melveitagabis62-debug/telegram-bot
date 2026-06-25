@@ -20,9 +20,17 @@ def main_menu():
 
 def forex_menu():
     keyboard = [
-        [InlineKeyboardButton("EUR/USD", callback_data="EURUSD"),
-         InlineKeyboardButton("GBP/USD", callback_data="GBPUSD")],
-        [InlineKeyboardButton("USD/JPY", callback_data="USDJPY")]
+        [InlineKeyboardButton("EUR/USD", callback_data="EURUSD")],
+        [InlineKeyboardButton("GBP/USD", callback_data="GBPUSD")],
+        [InlineKeyboardButton("USD/JPY", callback_data="USDJPY")],
+
+        # 🔥 ADD THESE
+        [InlineKeyboardButton("AUD/USD", callback_data="AUDUSD")],
+        [InlineKeyboardButton("USD/CAD", callback_data="USDCAD")],
+        [InlineKeyboardButton("USD/CHF", callback_data="USDCHF")],
+        [InlineKeyboardButton("NZD/USD", callback_data="NZDUSD")],
+        [InlineKeyboardButton("EUR/JPY", callback_data="EURJPY")],
+        [InlineKeyboardButton("GBP/JPY", callback_data="GBPJPY")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -113,7 +121,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "forex":
         await query.edit_message_text("Select Pair:", reply_markup=forex_menu())
 
-    elif data in ["EURUSD", "GBPUSD", "USDJPY"]:
+    elif data in ["EURUSD", "GBPUSD", "USDJPY", "USDCHF",
+    "AUDUSD", "USDCAD", "NZDUSD",
+    "EURGBP", "EURJPY", "GBPJPY",
+    "EURCHF", "AUDJPY", "GBPCHF"]:
         await query.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu(data))
 
     elif "_" in data:
