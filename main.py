@@ -129,9 +129,9 @@ def generate_signal(pair, timeframe):
 📈 Signal: {signal_display}
 
 🧠 Indicators:
-RSI: {round(rsi,2)}
-MACD: {round(macd,2)}
-EMA20: {round(ema,2)}
+EMA20: {round(ema20,2)}
+EMA50: {round(ema50,2)}
+ADX: {round(adx,2)}
 
 ⚡ Powered by TradingView
 """
