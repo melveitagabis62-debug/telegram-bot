@@ -84,6 +84,11 @@ except Exception as e:
 
         signal = "HOLD"
 
+        return signal   # or your full message
+
+    except Exception as e:
+        return f"Error: {str(e)}"
+
         if rsi < 30 and macd > 0:
         signal = "BUY"
         elif rsi > 70 and macd < 0:
