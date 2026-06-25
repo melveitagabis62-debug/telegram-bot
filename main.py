@@ -135,7 +135,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     "EURCHF", "AUDJPY", "GBPCHF"
                  ]:
         await query.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu(data))
-
+                     
+    elif data in ["1m", "5m", "15m"]:
+        
+        await query.message.reply_text(f"⏱ Timeframe selected: {data}")
+    
     elif "_" in data:
         pair, tf = data.split("_")
 
