@@ -111,7 +111,7 @@ def generate_signal(pair, timeframe):
     except Exception as e:
         return f"Error: {str(e)}"
 
- Indicators:
+Indicators:
 RSI: {round(rsi,2)}
 MACD: {round(macd,2)}
 EMA20: {round(ema,2)}
