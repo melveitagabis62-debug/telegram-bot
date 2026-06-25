@@ -97,9 +97,7 @@ def generate_signal(pair, timeframe):
         else:
             safe_entry = close * 1.005
 
-try: 
-    return f"""
-    
+return f"""
 📊 Sigma AI Trade
 
 💱 Pair: {pair}
@@ -111,8 +109,7 @@ try:
 
 ⚡ Powered by TradingView
 """
-except Exception as e:
-    print(e)
+
 # ================= HANDLERS =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
