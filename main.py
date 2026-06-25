@@ -97,7 +97,7 @@ expiration = expiration_map.get(timeframe, "N/A")
         safe_entry = close * 0.995   # slightly lower entry
         elif signal == "SELL":
         safe_entry = close * 1.005   # slightly higher entry
-        💰 Entry: {safe_entry:.5f}
+        Entry: {safe_entry:.5f}
 
         return f"""
         
