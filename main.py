@@ -58,7 +58,6 @@ def get_analysis(symbol, interval):
 
 
 def generate_signal(pair, timeframe):
-    try:
         interval_map = {
             "1m": Interval.INTERVAL_1_MINUTE,
             "5m": Interval.INTERVAL_5_MINUTES,
