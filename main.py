@@ -78,20 +78,29 @@ expiration = expiration_map.get(timeframe, "N/A")
         rsi = analysis.indicators["RSI"]
         macd = analysis.indicators["MACD.macd"]
         ema = analysis.indicators["EMA20"]
-        close = analysis.indicators["close"]
+        close = analysis.indicators["close"]   # ✅ added
+
         signal = "HOLD"
 
-        # 🔥 Improved logic
         if rsi < 30 and macd > 0:
-            signal = "BUY"
+        signal = "BUY"
         elif rsi > 70 and macd < 0:
-            signal = "SELL"
-        elif ema < close:
-            signal = "BUY"
+        signal = "SELL"
+        elif ema < close:   # ✅ fixed
+        signal = "BUY"
         else:
-            signal = "SELL"
+        signal = "SELL"
+
+        safe_entry = close
+
+        if signal == "BUY":
+        safe_entry = close * 0.995   # slightly lower entry
+        elif signal == "SELL":
+        safe_entry = close * 1.005   # slightly higher entry
+        💰 Entry: {safe_entry:.5f}
 
         return f"""
+        
 📊 Sigma AI Trade
 
 💱 Pair: {pair}
