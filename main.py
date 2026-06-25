@@ -110,8 +110,8 @@ def generate_signal(pair, timeframe):
 
 ⚡ Powered by TradingView
 """
-
-
+except Exception as e:
+    print(e)
 # ================= HANDLERS =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
