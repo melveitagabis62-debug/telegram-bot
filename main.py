@@ -4,7 +4,9 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 from tradingview_ta import TA_Handler, Interval
 import logging
 
-TOKEN = "YOUR_BOT_TOKEN"
+import os
+
+TOKEN = os.getenv("TOKEN")
 
 # ================= MENU =================
 
