@@ -86,9 +86,6 @@ except Exception as e:
 
         return signal   # or your full message
 
-    except Exception as e:
-        return f"Error: {str(e)}"
-
         if rsi < 30 and macd > 0:
         signal = "BUY"
         elif rsi > 70 and macd < 0:
@@ -104,6 +101,8 @@ except Exception as e:
         safe_entry = close * 0.995   # slightly lower entry
         elif signal == "SELL":
         safe_entry = close * 1.005   # slightly higher entry
+except Exception as e:
+    return "Error"
 
         return f"""
 📊 Sigma AI Trade
