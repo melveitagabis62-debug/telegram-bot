@@ -71,7 +71,10 @@ def generate_signal(pair, timeframe):
             "15m": "10-15 min"
         }
 
-expiration = expiration_map.get(timeframe, "N/A")
+  try:
+    expiration = expiration_map.get(timeframe)
+except Exception as e:
+    expiration = "N/A"
 
         analysis = get_analysis(pair, interval_map[timeframe])
 
