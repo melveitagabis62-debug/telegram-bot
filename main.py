@@ -23,7 +23,6 @@ def forex_menu():
         [InlineKeyboardButton("EUR/USD", callback_data="EURUSD")],
         [InlineKeyboardButton("GBP/USD", callback_data="GBPUSD")],
         [InlineKeyboardButton("USD/JPY", callback_data="USDJPY")],
-
         # 🔥 ADD THESE
         [InlineKeyboardButton("AUD/USD", callback_data="AUDUSD")],
         [InlineKeyboardButton("USD/CAD", callback_data="USDCAD")],
@@ -31,6 +30,7 @@ def forex_menu():
         [InlineKeyboardButton("NZD/USD", callback_data="NZDUSD")],
         [InlineKeyboardButton("EUR/JPY", callback_data="EURJPY")],
         [InlineKeyboardButton("GBP/JPY", callback_data="GBPJPY")]
+        [InlineKeyboardButton("⬅️ Back", callback_data="back_main")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -40,6 +40,7 @@ def timeframe_menu(pair):
         [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"),
          InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
         [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")]
+        [InlineKeyboardButton("⬅️ Back", callback_data="back_forex")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -132,11 +133,24 @@ EMA20: {round(ema,2)}
 
 # ================= HANDLERS =================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🚀 Welcome to Sigma AI Bot",
-        reply_markup=main_menu()
-    )
+from telegram import ReplyKeyboardMarkup
+
+keyboard = [["🚀 Start Bot"]]
+reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+await update.message.reply_text(
+    "👋 Welcome! Click below to start:",
+    reply_markup=reply_markup
+)
+
+from telegram.ext import MessageHandler, filters
+
+async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == "🚀 Start Bot":
+        await update.message.reply_text(
+            "🚀 Welcome to Sigma AI Bot",
+            reply_markup=main_menu()
+        )
 
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -161,6 +175,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_text(result)
 
+    elif data == "back_main":
+    await query.edit_message_text(
+        "🚀 Welcome to Sigma AI Bot",
+        reply_markup=main_menu()
+    )
+
+    elif data == "back_forex":
+    await query.edit_message_text(
+        "Select Pair:",
+        reply_markup=forex_menu()
+    )
 
 # ================= RUN =================
 
@@ -168,6 +193,7 @@ app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(button_handler))
+app.add_handler(MessageHandler(filters.TEXT, start_button))
 
 print("Bot running...")
 app.run_polling()
