@@ -135,16 +135,16 @@ EMA20: {round(ema,2)}
 
 from telegram import ReplyKeyboardMarkup
 
-keyboard = [["🚀 Start Bot"]]
-reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
-        await update.message.reply_text(
-    "👋 Welcome! Click below to start:",
-    reply_markup=reply_markup
-)
-
 from telegram.ext import MessageHandler, filters
 
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [["🚀 Start Bot"]]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+    await update.message.reply_text(
+        "👋 Welcome! Click below to start:",
+        reply_markup=reply_markup
+    )
 async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "🚀 Start Bot":
         await update.message.reply_text(
