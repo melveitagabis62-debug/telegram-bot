@@ -140,14 +140,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pair = context.user_data.get("pair")
 
     if not pair:
-        await
-    query.message.reply_text("⚠️ Select pair first")
-            return
+        await query.message.reply_text("⚠️ Select pair first")
+        return
 
-        result = generate_signal(pair, data)
+    result = generate_signal(pair, data)
 
-        await
-    query.message.reply_text(result)
+    await query.message.reply_text(result)
 
 
 # ================= RUN =================
