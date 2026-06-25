@@ -182,7 +182,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     elif data == "back_forex":
-    await query.edit_message_text(
+        await query.edit_message_text(
         "Select Pair:",
         reply_markup=forex_menu()
     )
