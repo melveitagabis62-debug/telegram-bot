@@ -102,13 +102,21 @@ def generate_signal(pair, timeframe):
         else:
             signal = "HOLD"
 
+        # 🔥 Add this
+        if signal == "BUY":
+        signal_display = "🟢 BUY"
+        elif signal == "SELL":
+        signal_display = "🔴 SELL"
+        else:
+        signal_display = "🟡 HOLD"
+
         return f"""
 📊 Sigma AI Trade
 
 💱 Pair: {pair}
 ⏱ Timeframe: {timeframe}
 
-📈 Signal: {signal}
+📈 Signal: {signal_display}
 
 🧠 Indicators:
 RSI: {round(rsi,2)}
