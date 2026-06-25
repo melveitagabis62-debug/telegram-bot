@@ -109,7 +109,7 @@ def generate_signal(pair, timeframe):
 """
 
     except Exception as e:
-        return f"Error: {str(e)}"}
+        return f"Error: {str(e)}"
 
 🧠 Indicators:
 RSI: {round(rsi,2)}
