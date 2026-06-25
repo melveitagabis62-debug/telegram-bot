@@ -98,6 +98,7 @@ def generate_signal(pair, timeframe):
             safe_entry = close * 1.005
 
         return f"""
+📊 Sigmareturn f"""
 📊 Sigma AI Trade
 
 💱 Pair: {pair}
@@ -106,15 +107,6 @@ def generate_signal(pair, timeframe):
 📈 Signal: {signal}
 🎯 Safe Entry: {round(safe_entry, 5)}
 ⏳ Expiration: {expiration}
-"""
-
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-Indicators:
-RSI: {round(rsi,2)}
-MACD: {round(macd,2)}
-EMA20: {round(ema,2)}
 
 ⚡ Powered by TradingView
 """
