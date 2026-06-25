@@ -29,7 +29,7 @@ def forex_menu():
         [InlineKeyboardButton("USD/CHF", callback_data="USDCHF")],
         [InlineKeyboardButton("NZD/USD", callback_data="NZDUSD")],
         [InlineKeyboardButton("EUR/JPY", callback_data="EURJPY")],
-        [InlineKeyboardButton("GBP/JPY", callback_data="GBPJPY")]
+        [InlineKeyboardButton("GBP/JPY", callback_data="GBPJPY")],
         [InlineKeyboardButton("⬅️ Back", callback_data="back_main")]
     ]
     return InlineKeyboardMarkup(keyboard)
