@@ -71,38 +71,31 @@ def generate_signal(pair, timeframe):
             "15m": "10-15 min"
         }
 
-    expiration = expiration_map.get(timeframe)
-except Exception as e:
-    expiration = "N/A"
+        interval = interval_map.get(timeframe)
+        expiration = expiration_map.get(timeframe)
 
-        analysis = get_analysis(pair, interval_map[timeframe])
+        analysis = get_analysis(pair, interval)
 
         rsi = analysis.indicators["RSI"]
         macd = analysis.indicators["MACD.macd"]
         ema = analysis.indicators["EMA20"]
-        close = analysis.indicators["close"]   # ✅ added
+        close = analysis.indicators["close"]
 
-        signal = "HOLD"
-
-        return signal   # or your full message
-
+        # SIGNAL LOGIC
         if rsi < 30 and macd > 0:
-        signal = "BUY"
+            signal = "BUY"
         elif rsi > 70 and macd < 0:
-        signal = "SELL"
-        elif ema < close:   # ✅ fixed
-        signal = "BUY"
+            signal = "SELL"
+        elif ema < close:
+            signal = "BUY"
         else:
-        signal = "SELL"
+            signal = "SELL"
 
-        safe_entry = close
-
+        # SAFE ENTRY
         if signal == "BUY":
-        safe_entry = close * 0.995   # slightly lower entry
-        elif signal == "SELL":
-        safe_entry = close * 1.005   # slightly higher entry
-except Exception as e:
-    return "Error"
+            safe_entry = close * 0.995
+        else:
+            safe_entry = close * 1.005
 
         return f"""
 📊 Sigma AI Trade
@@ -111,7 +104,12 @@ except Exception as e:
 ⏱ Timeframe: {timeframe}
 
 📈 Signal: {signal}
-💰 Entry: {safe_entry:.5f}
+🎯 Safe Entry: {round(safe_entry, 5)}
+⏳ Expiration: {expiration}
+"""
+
+    except Exception as e:
+        return f"Error: {str(e)}"}
 
 🧠 Indicators:
 RSI: {round(rsi,2)}
