@@ -119,9 +119,6 @@ EMA20: {round(ema,2)}
 ⚡ Powered by TradingView
 """
 
-    except Exception as e:
-        print("ERROR:", e)
-        return "❌ Failed to fetch data"
 
 # ================= HANDLERS =================
 
