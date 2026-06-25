@@ -30,7 +30,7 @@ def forex_menu():
         [InlineKeyboardButton("NZD/USD", callback_data="NZDUSD")],
         [InlineKeyboardButton("EUR/JPY", callback_data="EURJPY")],
         [InlineKeyboardButton("GBP/JPY", callback_data="GBPJPY")],
-        [InlineKeyboardButton("⬅️ Back", callback_data="back_main")]
+        [InlineKeyboardButton("⬅️ Back", callback_data="back_main")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -39,9 +39,9 @@ def timeframe_menu(pair):
     keyboard = [
         [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"),
          InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
-        [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")]
+        [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")],
         
-        [InlineKeyboardButton("⬅️ Back", callback_data="back_forex")]
+        [InlineKeyboardButton("⬅️ Back", callback_data="back_forex")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
