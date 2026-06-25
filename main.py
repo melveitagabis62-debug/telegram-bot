@@ -155,7 +155,7 @@ async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-        await query.answer()
+    await query.answer()
 
     data = query.data
 
