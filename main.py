@@ -86,7 +86,7 @@ expiration = expiration_map.get(timeframe, "N/A")
             signal = "BUY"
         elif rsi > 70 and macd < 0:
             signal = "SELL"
-        elif ema < analysis.indicators["close"]:
+        elif ema < close:
             signal = "BUY"
         else:
             signal = "SELL"
