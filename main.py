@@ -37,9 +37,9 @@ def forex_menu():
 
 def timeframe_menu(pair):
     keyboard = [
-        [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"),
-         InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
-        [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")]
+        InlineKeyboardButton("1m", callback_data="1m")
+        InlineKeyboardButton("5m", callback_data="5m")
+        InlineKeyboardButton("15m", callback_data="15m")
     ]
     return InlineKeyboardMarkup(keyboard)
 
