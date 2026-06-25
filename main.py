@@ -70,38 +70,37 @@ def generate_signal(pair, timeframe):
         rsi = analysis.indicators["RSI"]
         macd = analysis.indicators["MACD.macd"]
         ema = analysis.indicators["EMA20"]
+        price = analysis.indicators["close"]
 
-        # 🔥 Confluence-based logic
-buy_conditions = 0
-sell_conditions = 0
+        # 🔥 Confluence-based logic (FIXED POSITION)
+        buy_conditions = 0
+        sell_conditions = 0
 
-price = analysis.indicators["close"]
+        # RSI
+        if rsi < 30:
+            buy_conditions += 1
+        elif rsi > 70:
+            sell_conditions += 1
 
-# RSI
-if rsi < 30:
-    buy_conditions += 1
-elif rsi > 70:
-    sell_conditions += 1
+        # MACD
+        if macd > 0:
+            buy_conditions += 1
+        else:
+            sell_conditions += 1
 
-# MACD
-if macd > 0:
-    buy_conditions += 1
-else:
-    sell_conditions += 1
+        # EMA Trend
+        if price > ema:
+            buy_conditions += 1
+        else:
+            sell_conditions += 1
 
-# EMA Trend
-if price > ema:
-    buy_conditions += 1
-else:
-    sell_conditions += 1
-
-# FINAL SIGNAL
-if buy_conditions >= 2:
-    signal = "BUY"
-elif sell_conditions >= 2:
-    signal = "SELL"
-else:
-    signal = "HOLD"
+        # FINAL SIGNAL
+        if buy_conditions >= 2:
+            signal = "BUY"
+        elif sell_conditions >= 2:
+            signal = "SELL"
+        else:
+            signal = "HOLD"
 
         return f"""
 📊 Sigma AI Trade
