@@ -78,7 +78,7 @@ expiration = expiration_map.get(timeframe, "N/A")
         rsi = analysis.indicators["RSI"]
         macd = analysis.indicators["MACD.macd"]
         ema = analysis.indicators["EMA20"]
-
+        close = analysis.indicators["close"]
         signal = "HOLD"
 
         # 🔥 Improved logic
