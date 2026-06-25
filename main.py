@@ -109,7 +109,6 @@ def generate_signal(pair, timeframe, signal, safe_entry, expiration):
 
 ⚡ Powered by TradingView
 """
-return f"""
 
 
 # ================= HANDLERS =================
