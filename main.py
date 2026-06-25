@@ -97,8 +97,9 @@ def generate_signal(pair, timeframe):
         else:
             safe_entry = close * 1.005
 
-        return f"""
-        
+try: 
+    return f"""
+    
 📊 Sigma AI Trade
 
 💱 Pair: {pair}
