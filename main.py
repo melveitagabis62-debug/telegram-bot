@@ -71,7 +71,6 @@ def generate_signal(pair, timeframe):
             "15m": "10-15 min"
         }
 
-  try:
     expiration = expiration_map.get(timeframe)
 except Exception as e:
     expiration = "N/A"
