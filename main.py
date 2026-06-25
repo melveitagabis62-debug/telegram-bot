@@ -134,14 +134,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     "EURGBP", "EURJPY", "GBPJPY",
     "EURCHF", "AUDJPY", "GBPCHF"
                  ]:
+        context.user_data["pair"] = data
         await query.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu(data))
                      
     elif data in ["1m", "5m", "15m"]:
-    pair = context.user_data.get("pair")
+        pair = context.user_data.get("pair")
 
-    if not pair:
-        await query.message.reply_text("⚠️ Select pair first")
-        return
+        if not pair:
+        await query.message.reply_text("⚠️ Select pair first.")
+    return
 
     result = generate_signal(pair, data)
 
