@@ -71,46 +71,54 @@ def generate_signal(pair, timeframe):
 
         rsi = analysis.indicators["RSI"]
         macd = analysis.indicators["MACD.macd"]
-        ema = analysis.indicators["EMA20"]
+        macd_signal = analysis.indicators["MACD.signal"]
+        ema20 = analysis.indicators["EMA20"]
+        ema50 = analysis.indicators["EMA50"]
+        adx = analysis.indicators["ADX"]
         price = analysis.indicators["close"]
 
-        # 🔥 Confluence-based logic (FIXED POSITION)
         buy_conditions = 0
         sell_conditions = 0
 
-        # RSI
-        if rsi < 30:
+          # 🚫 Avoid weak trends
+        if adx < 20:
+            return "🟡 HOLD (Weak Trend)"
+
+          # RSI Momentum
+        if 30 < rsi < 60:
             buy_conditions += 1
-        elif rsi > 70:
+        elif 40 < rsi < 70:
             sell_conditions += 1
 
-        # MACD
-        if macd > 0:
-            buy_conditions += 1
-        else:
-            sell_conditions += 1
-
-        # EMA Trend
-        if price > ema:
+        # MACD crossover
+        if macd > macd_signal:
             buy_conditions += 1
         else:
             sell_conditions += 1
 
-        # FINAL SIGNAL
-        if buy_conditions >= 2:
+        # Trend confirmation
+        if price > ema20 and price > ema50:
+            buy_conditions += 1
+        elif price < ema20 and price < ema50:
+            sell_conditions += 1
+
+         # Multi-timeframe confirmation
+        higher_tf = get_analysis(pair, Interval.INTERVAL_5_MINUTES)
+        htf_price = higher_tf.indicators["close"]
+        htf_ema = higher_tf.indicators["EMA20"]
+
+        if price > ema20 and htf_price > htf_ema:
+            buy_conditions += 1
+        elif price < ema20 and htf_price < htf_ema:
+            sell_conditions += 1
+
+        # Final signal
+        if buy_conditions >= 3:
             signal = "BUY"
-        elif sell_conditions >= 2:
+        elif sell_conditions >= 3:
             signal = "SELL"
         else:
             signal = "HOLD"
-
-        # 🔥 Add this
-        if signal == "BUY":
-            signal_display = "🟢 BUY"
-        elif signal == "SELL":
-            signal_display = "🔴 SELL"
-        else:
-            signal_display = "🟡 HOLD"
 
         return f"""
 📊 Sigma AI Trade
