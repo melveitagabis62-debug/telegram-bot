@@ -1,15 +1,14 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 from tradingview_ta import TA_Handler, Interval
-import logging
-
+import asyncio
+import time
 import os
 
 TOKEN = os.getenv("TOKEN")
 ALLOWED_USERS = [6351041498]  # replace with your Telegram ID
 
-# 🔥 ADD THIS RIGHT HERE
 PAIRS = [
     "EURUSD", "GBPUSD", "USDJPY", "AUDUSD",
     "USDCAD", "USDCHF", "NZDUSD",
@@ -35,11 +34,8 @@ def forex_menu():
     row = []
 
     for i, pair in enumerate(PAIRS, 1):
-        display = pair[:3] + "/" + pair[3:]  # EURUSD → EUR/USD
-
-        row.append(
-            InlineKeyboardButton(display, callback_data=pair)
-        )
+        display = pair[:3] + "/" + pair[3:]
+        row.append(InlineKeyboardButton(display, callback_data=pair))
 
         if i % 2 == 0:
             keyboard.append(row)
@@ -48,9 +44,7 @@ def forex_menu():
     if row:
         keyboard.append(row)
 
-    keyboard.append([
-        InlineKeyboardButton("⬅️ Back", callback_data="back")
-    ])
+    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="back_main")])
 
     return InlineKeyboardMarkup(keyboard)
 
@@ -60,12 +54,11 @@ def timeframe_menu(pair):
         [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"),
          InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
         [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")],
-        
         [InlineKeyboardButton("⬅️ Back", callback_data="back_forex")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# ================= SIGNAL =================
+# ================= ANALYSIS =================
 
 def get_analysis(symbol, interval):
     handler = TA_Handler(
@@ -74,10 +67,9 @@ def get_analysis(symbol, interval):
         exchange="FX_IDC",
         interval=interval
     )
+    return handler.get_analysis()
 
-    analysis = handler.get_analysis()
-    return analysis
-
+# ================= SIGNAL =================
 
 def generate_signal(pair, timeframe):
     try:
@@ -92,121 +84,163 @@ def generate_signal(pair, timeframe):
         rsi = analysis.indicators["RSI"]
         ema50 = analysis.indicators["EMA50"]
         price = analysis.indicators["close"]
-        high = analysis.indicators.get("high", price)
-        low = analysis.indicators.get("low", price)
+
+        distance_from_ema = abs(price - ema50) / price
 
         signal = "HOLD"
         warning = ""
         entry_price = None
-        direction = ""
 
-        # Strong trend filter (avoid choppy or trending markets)
-        distance_from_ema = abs(price - ema50) / price
-        if distance_from_ema > 0.0028:  
-            warning = "⚠️ Strong trend or volatile market → HIGH RISK"
+        # ❌ Avoid bad market
+        if distance_from_ema > 0.0028:
+            warning = "⚠️ Market too strong / volatile → Skip"
 
-        # ================= STRATEGY LOGIC (Mean Reversion) =================
-        if rsi < 32 and price >= ema50 * 0.993:           # Strong oversold + near EMA
+        # ✅ Strategy
+        if rsi < 32 and price >= ema50 * 0.993:
             signal = "BUY"
-            direction = "CALL"
-            entry_price = round(max(price, ema50 * 0.997), 5)   # Enter near EMA
+            entry_price = round(max(price, ema50 * 0.997), 5)
 
-        elif rsi > 68 and price <= ema50 * 1.007:         # Strong overbought + near EMA
+        elif rsi > 68 and price <= ema50 * 1.007:
             signal = "SELL"
-            direction = "PUT"
             entry_price = round(min(price, ema50 * 1.003), 5)
 
         else:
             signal = "HOLD"
-            warning = "⚠️ Market is not good → Don't Trade"
+            warning = "⚠️ Market not good → Don't Trade"
 
-        # ================= DISPLAY =================
         if signal == "BUY":
-            signal_display = f"🟢 BUY / CALL"
-            entry_text = f"📍 Enter **CALL** at **{entry_price}**\n" \
-                        f"   → Or wait for next candle open"
+            signal_display = "🟢 BUY / CALL"
+            entry_text = f"📍 Enter CALL at {entry_price}\n→ Next candle entry"
         elif signal == "SELL":
-            signal_display = f"🔴 SELL / PUT"
-            entry_text = f"📍 Enter **PUT** at **{entry_price}**\n" \
-                        f"   → Or wait for next candle open"
+            signal_display = "🔴 SELL / PUT"
+            entry_text = f"📍 Enter PUT at {entry_price}\n→ Next candle entry"
         else:
             signal_display = "🟡 HOLD"
-            entry_text = "⛔ Do not trade right now"
+            entry_text = "⛔ No trade"
 
         return f"""
-📊 **Sigma AI - Pocket Option Signal**
+📊 Sigma AI Signal
 
-💱 Pair: **{pair}**
-⏱ Timeframe: **{timeframe}**
+💱 {pair}
+⏱ {timeframe}
 
-📈 **Signal**: **{signal_display}**
+📈 {signal_display}
 
 {entry_text}
 
 {warning}
 
-🧠 **Strategy**: Mean Reversion (RSI + EMA50)
-
-📊 **Indicators**:
-• RSI: `{round(rsi, 2)}`
-• EMA50: `{round(ema50, 5)}`
-• Current Price: `{round(price, 5)}`
-
-⚡ **Tip for Pocket Option**:
-• Use **Next Candle** entry to avoid repaints
-• Best for 1-5 minute expirations
-• Avoid news times!
+RSI: {round(rsi,2)}
+EMA50: {round(ema50,5)}
+Price: {round(price,5)}
 """
 
     except Exception as e:
         print("ERROR:", e)
-        return "❌ Failed to fetch data. Please try again."
+        return "❌ Failed to fetch data."
+
+# ================= AUTO DETECT =================
+
+def is_good_chart(pair, timeframe):
+    try:
+        interval_map = {
+            "1m": Interval.INTERVAL_1_MINUTE,
+            "5m": Interval.INTERVAL_5_MINUTES,
+            "15m": Interval.INTERVAL_15_MINUTES
+        }
+
+        analysis = get_analysis(pair, interval_map[timeframe])
+
+        rsi = analysis.indicators["RSI"]
+        ema50 = analysis.indicators["EMA50"]
+        price = analysis.indicators["close"]
+
+        distance_from_ema = abs(price - ema50) / price
+
+        if distance_from_ema > 0.003:
+            return False
+
+        if (rsi < 32 and price >= ema50 * 0.995) or \
+           (rsi > 68 and price <= ema50 * 1.005):
+            return True
+
+        return False
+
+    except:
+        return False
+
+# ================= AUTO SIGNAL LOOP =================
+
+last_sent = {}
+
+async def auto_signal_loop(app):
+    await asyncio.sleep(10)
+
+    while True:
+        print("🔄 Scanning market...")
+
+        for pair in PAIRS:
+            if is_good_chart(pair, "1m"):
+
+                now = time.time()
+
+                if pair in last_sent and now - last_sent[pair] < 300:
+                    continue
+
+                last_sent[pair] = now
+
+                message = f"""
+🚨 MARKET ALERT
+
+💱 {pair} is GOOD for trading now!
+
+📊 Clean setup detected (RSI + EMA)
+
+⚡ Get signal now!
+
+⏱ Timeframe: 1m
+"""
+
+                for user_id in ALLOWED_USERS:
+                    await app.bot.send_message(chat_id=user_id, text=message)
+
+                await asyncio.sleep(3)
+
+        await asyncio.sleep(60)
 
 # ================= HANDLERS =================
 
-from telegram import ReplyKeyboardMarkup
-
-from telegram.ext import MessageHandler, filters
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-
-    if user_id not in ALLOWED_USERS:
+    if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("⛔ Access Denied")
         return
 
     keyboard = [["🚀 Start Bot"]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
     await update.message.reply_text(
-        "👋 Welcome! Click below to start:",
-        reply_markup=reply_markup
+        "👋 Welcome!",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
-async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id  # 👈 ADD THIS
 
-    # 🔒 BLOCK UNAUTHORIZED USERS
-    if user_id not in ALLOWED_USERS:
+
+async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ALLOWED_USERS:
         return
 
     if update.message.text == "🚀 Start Bot":
         await update.message.reply_text(
-            "🚀 Welcome to Sigma AI Bot",
+            "🚀 Sigma AI Bot Ready",
             reply_markup=main_menu()
         )
 
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    user_id = query.from_user.id   # 👈 ADD THIS
 
-    # 🔒 BLOCK UNAUTHORIZED USERS
-    if user_id not in ALLOWED_USERS:
+    if query.from_user.id not in ALLOWED_USERS:
         await query.answer("⛔ Access Denied", show_alert=True)
         return
 
     await query.answer()
-
     data = query.data
 
     if data == "forex":
@@ -217,22 +251,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif "_" in data:
         pair, tf = data.split("_")
-
         result = generate_signal(pair, tf)
-
         await query.edit_message_text(result)
 
     elif data == "back_main":
-        await query.edit_message_text(
-        "🚀 Welcome to Sigma AI Bot",
-        reply_markup=main_menu()
-    )
+        await query.edit_message_text("🚀 Sigma AI Bot", reply_markup=main_menu())
 
     elif data == "back_forex":
-        await query.edit_message_text(
-        "Select Pair:",
-        reply_markup=forex_menu()
-    )
+        await query.edit_message_text("Select Pair:", reply_markup=forex_menu())
 
 # ================= RUN =================
 
@@ -242,6 +268,11 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT, start_button))
 
-print("Bot running...")
-app.run_polling()
-            
+async def main():
+    print("Bot running...")
+
+    asyncio.create_task(auto_signal_loop(app))
+
+    await app.run_polling()
+
+asyncio.run(main())
