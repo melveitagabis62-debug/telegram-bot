@@ -29,6 +29,7 @@ def forex_menu():
         [InlineKeyboardButton("USD/CHF", callback_data="USDCHF")],
         [InlineKeyboardButton("NZD/USD", callback_data="NZDUSD")],
         [InlineKeyboardButton("EUR/JPY", callback_data="EURJPY")],
+        [InlineKeyboardButton("EUR/AUD", callback_data="EURAUD")],
         [InlineKeyboardButton("GBP/JPY", callback_data="GBPJPY")],
         [InlineKeyboardButton("⬅️ Back", callback_data="back_main")],
     ]
@@ -195,7 +196,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data in ["EURUSD", "GBPUSD", "USDJPY", "USDCHF",
     "AUDUSD", "USDCAD", "NZDUSD",
     "EURGBP", "EURJPY", "GBPJPY",
-    "EURCHF", "AUDJPY", "GBPCHF"]:
+    "EURCHF", "AUDJPY", "GBPCHF", "EURAUD"]:
         await query.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu(data))
 
     elif "_" in data:
