@@ -230,7 +230,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def auto_signal(context: ContextTypes.DEFAULT_TYPE):
         for pair in PAIRS:
-    try:
+        try:
             result = generate_signal(pair, AUTO_TIMEFRAME)
 
             # 🔥 Only send BUY or SELL
@@ -248,8 +248,8 @@ async def auto_signal(context: ContextTypes.DEFAULT_TYPE):
                     text=f"🚨 AUTO SIGNAL\n\n{result}"
                 )
 
-    except Exception as e:
-        print("AUTO ERROR:", e)
+        except Exception as e:
+            print("AUTO ERROR:", e)
 
 # ================= RUN =================
 
