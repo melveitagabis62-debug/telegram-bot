@@ -2,10 +2,8 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKe
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 from tradingview_ta import TA_Handler, Interval
-import asyncio
-import time
 import os
-import datetime
+import time
 
 TOKEN = os.getenv("TOKEN")
 ALLOWED_USERS = [6351041498]
@@ -23,13 +21,15 @@ PAIRS = [
 # ================= MENU =================
 
 def main_menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 Forex", callback_data="forex")],
-        [InlineKeyboardButton("💰 Crypto", callback_data="crypto")]
-    ])
+    keyboard = [
+        [InlineKeyboardButton("📊 Forex", callback_data="forex")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 
 def forex_menu():
-    keyboard, row = [], []
+    keyboard = []
+    row = []
 
     for i, pair in enumerate(PAIRS, 1):
         display = pair[:3] + "/" + pair[3:]
@@ -43,15 +43,18 @@ def forex_menu():
         keyboard.append(row)
 
     keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="back_main")])
+
     return InlineKeyboardMarkup(keyboard)
 
+
 def timeframe_menu(pair):
-    return InlineKeyboardMarkup([
+    keyboard = [
         [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"),
          InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
         [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")],
         [InlineKeyboardButton("⬅️ Back", callback_data="back_forex")]
-    ])
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
 # ================= ANALYSIS =================
 
@@ -64,15 +67,8 @@ def get_analysis(symbol, interval):
     )
     return handler.get_analysis()
 
-def get_support_resistance(analysis):
-    try:
-        high = analysis.indicators.get("high")
-        low = analysis.indicators.get("low")
-        return low, high
-    except:
-        return None, None
 
-# ================= SIGNAL =================
+# ================= SIGNAL ENGINE =================
 
 def generate_signal(pair, timeframe):
     try:
@@ -86,163 +82,136 @@ def generate_signal(pair, timeframe):
 
         rsi = analysis.indicators["RSI"]
         ema50 = analysis.indicators["EMA50"]
+        ema200 = analysis.indicators.get("EMA200", ema50)
         price = analysis.indicators["close"]
+        high = analysis.indicators.get("high", price)
+        low = analysis.indicators.get("low", price)
 
-        support, resistance = get_support_resistance(analysis)
-        distance_from_ema = abs(price - ema50) / price
+        # 🔥 Higher timeframe (15m)
+        htf = get_analysis(pair, Interval.INTERVAL_15_MINUTES)
+        htf_rsi = htf.indicators["RSI"]
 
         signal = "HOLD"
+        warning = ""
         entry_price = None
-        reason = ""
 
-        # ❌ Smart no-trade filter
-        if distance_from_ema > 0.003:
-            reason = "Strong trend / risky"
-        elif 45 < rsi < 55:
-            reason = "Weak RSI (sideways)"
-        elif support and resistance:
-            mid = (support + resistance) / 2
-            if abs(price - mid) / price < 0.0015:
-                reason = "Middle zone (no edge)"
-
-        # ✅ Buy near support
-        if support and price <= support * 1.002 and rsi < 35:
-            signal = "BUY"
-            entry_price = price
-
-        # ✅ Sell near resistance
-        elif resistance and price >= resistance * 0.998 and rsi > 65:
-            signal = "SELL"
-            entry_price = price
-
-        # DISPLAY
-        if signal == "BUY":
-            text = "🟢 BUY / CALL"
-        elif signal == "SELL":
-            text = "🔴 SELL / PUT"
+        # ================= TREND =================
+        if ema50 > ema200:
+            trend = "UPTREND"
+        elif ema50 < ema200:
+            trend = "DOWNTREND"
         else:
-            text = "🟡 NO TRADE"
+            trend = "SIDEWAYS"
+
+        # ================= NO TRADE =================
+        if 45 < rsi < 55:
+            return f"""
+🟡 NO TRADE
+
+💱 {pair} | {timeframe}
+⚠️ Market is sideways
+
+📊 RSI: {round(rsi,2)}
+"""
+
+        # ================= SIGNAL =================
+        if rsi < 32 and price >= ema50 * 0.993:
+            signal = "BUY"
+            entry_price = round(max(price, ema50 * 0.997), 5)
+
+        elif rsi > 68 and price <= ema50 * 1.007:
+            signal = "SELL"
+            entry_price = round(min(price, ema50 * 1.003), 5)
+
+        else:
+            signal = "HOLD"
+            warning = "⚠️ Weak setup"
+
+        # ================= TREND FILTER =================
+        if signal == "BUY" and trend == "DOWNTREND":
+            signal = "HOLD"
+            warning += "\n⚠️ Against downtrend"
+
+        if signal == "SELL" and trend == "UPTREND":
+            signal = "HOLD"
+            warning += "\n⚠️ Against uptrend"
+
+        # ================= SUPPORT/RESISTANCE =================
+        if signal == "BUY" and price > high * 0.995:
+            signal = "HOLD"
+            warning += "\n⚠️ Near resistance"
+
+        if signal == "SELL" and price < low * 1.005:
+            signal = "HOLD"
+            warning += "\n⚠️ Near support"
+
+        # ================= HTF CONFIRM =================
+        if signal == "BUY" and htf_rsi < 50:
+            signal = "HOLD"
+            warning += "\n⚠️ HTF bearish"
+
+        if signal == "SELL" and htf_rsi > 50:
+            signal = "HOLD"
+            warning += "\n⚠️ HTF bullish"
+
+        # ================= CONFIDENCE =================
+        confidence = 50
+
+        if signal == "BUY":
+            if rsi < 25:
+                confidence += 25
+            if abs(price - ema50) < price * 0.002:
+                confidence += 15
+
+        if signal == "SELL":
+            if rsi > 75:
+                confidence += 25
+            if abs(price - ema50) < price * 0.002:
+                confidence += 15
+
+        confidence = min(confidence, 95)
+
+        # ================= TIMER =================
+        seconds = int(time.time()) % 60
+        countdown = 60 - seconds
+
+        # ================= DISPLAY =================
+        if signal == "BUY":
+            signal_text = "🟢 BUY / CALL"
+            entry = f"📍 Entry: {entry_price} or next candle"
+        elif signal == "SELL":
+            signal_text = "🔴 SELL / PUT"
+            entry = f"📍 Entry: {entry_price} or next candle"
+        else:
+            signal_text = "🟡 HOLD"
+            entry = "⛔ No trade"
 
         return f"""
-📊 Sigma AI Signal
+📊 **Sigma AI PRO Signal**
 
-💱 {pair}
-⏱ {timeframe}
+💱 Pair: **{pair}**
+⏱ Timeframe: **{timeframe}**
 
-📈 {text}
+📈 Signal: **{signal_text}**
+🔥 Confidence: **{confidence}%**
 
-📍 Entry: {entry_price if entry_price else "Wait"}
+{entry}
 
-📊 Support: {round(support,5) if support else "-"}
-📊 Resistance: {round(resistance,5) if resistance else "-"}
+📊 Trend: **{trend}**
+⏳ Next Candle: **{countdown}s**
 
-⚠️ {reason if reason else "Valid setup"}
+{warning}
 
-RSI: {round(rsi,2)}
-EMA50: {round(ema50,5)}
-Price: {round(price,5)}
+📊 Indicators:
+• RSI: {round(rsi,2)}
+• EMA50: {round(ema50,5)}
+• EMA200: {round(ema200,5)}
+• Price: {round(price,5)}
 """
 
     except Exception as e:
         print("ERROR:", e)
         return "❌ Failed to fetch data."
-
-# ================= SMART DETECTOR =================
-
-def is_good_chart(pair, timeframe):
-    try:
-        interval_map = {
-            "1m": Interval.INTERVAL_1_MINUTE,
-            "5m": Interval.INTERVAL_5_MINUTES,
-            "15m": Interval.INTERVAL_15_MINUTES
-        }
-
-        analysis = get_analysis(pair, interval_map[timeframe])
-
-        rsi = analysis.indicators["RSI"]
-        ema50 = analysis.indicators["EMA50"]
-        price = analysis.indicators["close"]
-
-        support, resistance = get_support_resistance(analysis)
-        distance_from_ema = abs(price - ema50) / price
-
-        if distance_from_ema > 0.003:
-            return False
-
-        if 45 < rsi < 55:
-            return False
-
-        if support and resistance:
-            mid = (support + resistance) / 2
-            if abs(price - mid) / price < 0.0015:
-                return False
-
-        if support and price <= support * 1.002 and rsi < 35:
-            return True
-
-        if resistance and price >= resistance * 0.998 and rsi > 65:
-            return True
-
-        return False
-
-    except:
-        return False
-
-# ================= TIMER =================
-
-def get_candle_time_left(timeframe):
-    now = datetime.datetime.utcnow()
-
-    if timeframe == "1m":
-        return 60 - now.second
-    elif timeframe == "5m":
-        return (5*60) - (now.minute % 5)*60 - now.second
-    elif timeframe == "15m":
-        return (15*60) - (now.minute % 15)*60 - now.second
-    return 60
-
-# ================= AUTO LOOP =================
-
-last_sent = {}
-
-async def auto_signal_loop(app):
-    await asyncio.sleep(10)
-
-    while True:
-        print("🔄 Scanning market...")
-
-        for pair in PAIRS:
-            if is_good_chart(pair, "1m"):
-
-                now = time.time()
-                if pair in last_sent and now - last_sent[pair] < 300:
-                    continue
-
-                last_sent[pair] = now
-
-                time_left = get_candle_time_left("1m")
-
-                message = f"""
-🚨 SMART SIGNAL ALERT
-
-💱 {pair}
-
-📊 Clean setup detected
-📍 Near Support/Resistance
-
-⏰ Wait {time_left}s for next candle
-
-⚡ Then get signal immediately!
-
-🎯 Pocket Option Ready
-"""
-
-                for user_id in ALLOWED_USERS:
-                    await app.bot.send_message(chat_id=user_id, text=message)
-
-                await asyncio.sleep(3)
-
-        await asyncio.sleep(60)
 
 # ================= HANDLERS =================
 
@@ -252,22 +221,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     keyboard = [["🚀 Start Bot"]]
-    await update.message.reply_text(
-        "👋 Welcome!",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    )
+    await update.message.reply_text("Click below:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+
 
 async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         return
 
     if update.message.text == "🚀 Start Bot":
-        await update.message.reply_text("🚀 Sigma AI Bot Ready", reply_markup=main_menu())
+        await update.message.reply_text("🚀 Sigma AI Bot", reply_markup=main_menu())
+
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    user_id = query.from_user.id
 
-    if query.from_user.id not in ALLOWED_USERS:
+    if user_id not in ALLOWED_USERS:
         await query.answer("⛔ Access Denied", show_alert=True)
         return
 
@@ -296,12 +265,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT, start_button))
+app.add_handler(CallbackQueryHandler(button_handler))
 
-async def main():
-    print("Bot running...")
-    asyncio.create_task(auto_signal_loop(app))
-    await app.run_polling()
-
-asyncio.run(main())
+print("Bot running...")
+app.run_polling()
