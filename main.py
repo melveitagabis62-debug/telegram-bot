@@ -54,7 +54,7 @@ def forex_menu():
         keyboard.append(row)
 
     keyboard.append([
-        InlineKeyboardButton("⬅️ Back", callback_data="back")
+        InlineKeyboardButton("⬅️ Back", callback_data="back_main")
     ])
 
     return InlineKeyboardMarkup(keyboard)
@@ -214,7 +214,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     # 🔥 FINAL STEP (PAIR + TIMEFRAME)
-    elif "_" in data:
+    elif any(tf in data for tf in ["_1m", "_5m", "_15m"]):
         pair, timeframe = data.split("_")  # ✅ IMPORTANT
 
         try:
