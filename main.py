@@ -199,6 +199,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("⛔ Access Denied", show_alert=True)
         return
 
+    # ✅ FIXED TIMEFRAME
+    TIMEFRAME_MAP = {
+        "1m": "1minute",
+        "5m": "5minute",
+        "15m": "15minute"
+    }
+
+    timeframe = TIMEFRAME_MAP.get(query.data, "1minute")
+
+    pair = "EURUSD"  # or your selected pair
+
+    try:
+        result = generate_signal(pair, timeframe)
+        await query.message.reply_text(result)
+
+    except Exception as e:
+        print("ERROR:", e)
+        await query.message.reply_text("❌ Failed to fetch data")
+
     await query.answer()
 
     data = query.data
