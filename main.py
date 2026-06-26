@@ -20,6 +20,11 @@ PAIRS = [
     "CADCHF"
 ]
 
+AUTO_TIMEFRAME = "1m"   # you can change to 5m
+SCAN_INTERVAL = 60      # seconds
+
+last_signals = {}  # prevent spam
+
 # ================= MENU =================
 
 def main_menu():
@@ -93,6 +98,29 @@ def generate_signal(pair, timeframe):
         macd = analysis.indicators["MACD.macd"]
         ema50 = analysis.indicators["EMA50"]
         price = analysis.indicators["close"]
+
+async def auto_signal(context: ContextTypes.DEFAULT_TYPE):
+        for pair in PAIRS:
+    try:
+            result = generate_signal(pair, AUTO_TIMEFRAME)
+
+            # 🔥 Only send BUY or SELL
+            if "BUY" in result or "SELL" in result:
+
+                # 🚫 prevent duplicate spam
+                if last_signals.get(pair) == result:
+                    continue
+
+                last_signals[pair] = result
+
+                # 📩 send to your Telegram ID
+                await context.bot.send_message(
+                    chat_id=ALLOWED_USERS[0],
+                    text=f"🚨 AUTO SIGNAL\n\n{result}"
+                )
+
+        except Exception as e:
+            print("AUTO ERROR:", e)
 
         # ================= STRATEGY LOGIC =================
 
@@ -231,4 +259,5 @@ app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT, start_button))
 
 print("Bot running...")
+app.job_queue.run_repeating(auto_signal, interval=SCAN_INTERVAL, first=10)
 app.run_polling()
