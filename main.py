@@ -90,65 +90,77 @@ def generate_signal(pair, timeframe):
         analysis = get_analysis(pair, interval_map[timeframe])
 
         rsi = analysis.indicators["RSI"]
-        macd = analysis.indicators["MACD.macd"]
         ema50 = analysis.indicators["EMA50"]
         price = analysis.indicators["close"]
-
-        # ================= STRATEGY LOGIC =================
+        high = analysis.indicators.get("high", price)
+        low = analysis.indicators.get("low", price)
 
         signal = "HOLD"
         warning = ""
+        entry_price = None
+        direction = ""
 
-        # 🔥 Detect strong trend (avoid trading)
-        if abs(price - ema50) > (price * 0.002):  # far from EMA = strong trend
-            warning = "⚠️ Strong trend detected → DO NOT TRADE"
+        # Strong trend filter (avoid choppy or trending markets)
+        distance_from_ema = abs(price - ema50) / price
+        if distance_from_ema > 0.0028:  
+            warning = "⚠️ Strong trend or volatile market → HIGH RISK"
 
-        # 🟢 BUY (mean reversion)
-        elif rsi < 30 and price >= ema50 * 0.995:
+        # ================= STRATEGY LOGIC (Mean Reversion) =================
+        if rsi < 32 and price >= ema50 * 0.993:           # Strong oversold + near EMA
             signal = "BUY"
+            direction = "CALL"
+            entry_price = round(max(price, ema50 * 0.997), 5)   # Enter near EMA
 
-        # 🔴 SELL (mean reversion)
-        elif rsi > 70 and price <= ema50 * 1.005:
+        elif rsi > 68 and price <= ema50 * 1.007:         # Strong overbought + near EMA
             signal = "SELL"
+            direction = "PUT"
+            entry_price = round(min(price, ema50 * 1.003), 5)
 
         else:
             signal = "HOLD"
-            warning = "⚠️ No clean setup → WAIT"
+            warning = "⚠️ Market is not good → Don't Trade"
 
         # ================= DISPLAY =================
-
         if signal == "BUY":
-            signal_display = "🟢 BUY (CALL)"
+            signal_display = f"🟢 BUY / CALL"
+            entry_text = f"📍 Enter **CALL** at **{entry_price}**\n" \
+                        f"   → Or wait for next candle open"
         elif signal == "SELL":
-            signal_display = "🔴 SELL (PUT)"
+            signal_display = f"🔴 SELL / PUT"
+            entry_text = f"📍 Enter **PUT** at **{entry_price}**\n" \
+                        f"   → Or wait for next candle open"
         else:
             signal_display = "🟡 HOLD"
+            entry_text = "⛔ Do not trade right now"
 
         return f"""
-📊 Sigma AI Smart Signal
+📊 **Sigma AI - Pocket Option Signal**
 
-💱 Pair: {pair}
-⏱ Timeframe: {timeframe}
+💱 Pair: **{pair}**
+⏱ Timeframe: **{timeframe}**
 
-📈 Signal: {signal_display}
+📈 **Signal**: **{signal_display}**
+
+{entry_text}
 
 {warning}
 
-🧠 Strategy:
-• Mean Reversion (No Chase)
-• RSI + EMA50 Filter
+🧠 **Strategy**: Mean Reversion (RSI + EMA50)
 
-📊 Indicators:
-RSI: {round(rsi,2)}
-EMA50: {round(ema50,2)}
-Price: {round(price,5)}
+📊 **Indicators**:
+• RSI: `{round(rsi, 2)}`
+• EMA50: `{round(ema50, 5)}`
+• Current Price: `{round(price, 5)}`
 
-⛔ Avoid trading during strong trends!
+⚡ **Tip for Pocket Option**:
+• Use **Next Candle** entry to avoid repaints
+• Best for 1-5 minute expirations
+• Avoid news times!
 """
 
     except Exception as e:
         print("ERROR:", e)
-        return "❌ Failed to fetch data"
+        return "❌ Failed to fetch data. Please try again."
 
 # ================= HANDLERS =================
 
