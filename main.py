@@ -69,7 +69,7 @@ def generate_signal(pair, timeframe):
         }
 
         import time
-            time.sleep(1)
+        time.sleep(1)
         
         analysis = get_analysis(pair, interval_map[timeframe])
 
