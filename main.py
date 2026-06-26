@@ -229,12 +229,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def auto_signal(context: ContextTypes.DEFAULT_TYPE):
-            for pair in PAIRS:
-    try:
+    for pair in PAIRS:
+        try:  # ✅ INDENTED
+
             result = generate_signal(pair, AUTO_TIMEFRAME)
 
             # 🔥 Only send BUY or SELL
-               if "BUY" in result or "SELL" in result:
+            if "BUY" in result or "SELL" in result:
 
                 # 🚫 prevent duplicate spam
                 if last_signals.get(pair) == result:
@@ -242,13 +243,13 @@ async def auto_signal(context: ContextTypes.DEFAULT_TYPE):
 
                 last_signals[pair] = result
 
-                # 📩 send to your Telegram ID
+                # 📩 send to your Telegram
                 await context.bot.send_message(
                     chat_id=ALLOWED_USERS[0],
                     text=f"🚨 AUTO SIGNAL\n\n{result}"
                 )
 
-        except Exception as e:
+        except Exception as e:  # ✅ same level as try
             print("AUTO ERROR:", e)
 
 # ================= RUN =================
