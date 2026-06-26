@@ -180,7 +180,7 @@ async def auto_signal_loop(app):
         print("🔄 Scanning market...")
 
         for pair in PAIRS:
-            if is_good_chart(pair, "1m"):
+            if True:
 
                 now = time.time()
 
