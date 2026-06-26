@@ -50,9 +50,9 @@ def timeframe_menu(pair):
 
 def get_analysis(symbol, interval):
     handler = TA_Handler(
-        symbol=symbol,
+        symbol=pair.replace("/", ""),
         screener="forex",
-        exchange="FX_IDC",
+        exchange="OANDA",
         interval=interval
     )
 
@@ -68,6 +68,9 @@ def generate_signal(pair, timeframe):
             "15m": Interval.INTERVAL_15_MINUTES
         }
 
+        import time
+            time.sleep(1)
+        
         analysis = get_analysis(pair, interval_map[timeframe])
 
         rsi = analysis.indicators["RSI"]
