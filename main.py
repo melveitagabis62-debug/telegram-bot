@@ -48,7 +48,6 @@ def timeframe_menu(pair):
 
 # ================= SIGNAL =================
 
-def get_analysis(symbol, interval):
 def get_analysis(pair, interval):
     try:
         handler = TA_Handler(
