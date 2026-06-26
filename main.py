@@ -79,7 +79,13 @@ def generate_signal(pair, timeframe):
 
         buy_conditions = 0
         sell_conditions = 0
-
+        
+          # === MARKET QUALITY FILTER ===
+        is_trending = adx > 20
+        is_sideways = abs(ema20 - ema50) < 0.1
+        rsi_safe_buy = rsi < 70
+        rsi_safe_sell = rsi > 30
+         
           # 🚫 Avoid weak trends
         if adx < 20:
             return "🟡 HOLD (Weak Trend)"
