@@ -9,6 +9,17 @@ import os
 TOKEN = os.getenv("TOKEN")
 ALLOWED_USERS = [6351041498]  # replace with your Telegram ID
 
+# 🔥 ADD THIS RIGHT HERE
+PAIRS = [
+    "EURUSD", "GBPUSD", "USDJPY", "AUDUSD",
+    "USDCAD", "USDCHF", "NZDUSD",
+    "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY",
+    "EURGBP", "EURCHF", "EURAUD", "EURCAD",
+    "GBPAUD", "GBPCAD", "GBPCHF",
+    "AUDCAD", "AUDCHF",
+    "CADCHF"
+]
+
 # ================= MENU =================
 
 def main_menu():
@@ -20,19 +31,27 @@ def main_menu():
 
 
 def forex_menu():
-    keyboard = [
-        [InlineKeyboardButton("EUR/USD", callback_data="EURUSD")],
-        [InlineKeyboardButton("GBP/USD", callback_data="GBPUSD")],
-        [InlineKeyboardButton("USD/JPY", callback_data="USDJPY")],
-        # 🔥 ADD THESE
-        [InlineKeyboardButton("AUD/USD", callback_data="AUDUSD")],
-        [InlineKeyboardButton("USD/CAD", callback_data="USDCAD")],
-        [InlineKeyboardButton("USD/CHF", callback_data="USDCHF")],
-        [InlineKeyboardButton("NZD/USD", callback_data="NZDUSD")],
-        [InlineKeyboardButton("EUR/JPY", callback_data="EURJPY")],
-        [InlineKeyboardButton("GBP/JPY", callback_data="GBPJPY")],
-        [InlineKeyboardButton("⬅️ Back", callback_data="back_main")],
-    ]
+    keyboard = []
+    row = []
+
+    for i, pair in enumerate(PAIRS, 1):
+        display = pair[:3] + "/" + pair[3:]  # EURUSD → EUR/USD
+
+        row.append(
+            InlineKeyboardButton(display, callback_data=pair)
+        )
+
+        if i % 2 == 0:
+            keyboard.append(row)
+            row = []
+
+    if row:
+        keyboard.append(row)
+
+    keyboard.append([
+        InlineKeyboardButton("⬅️ Back", callback_data="back")
+    ])
+
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -181,10 +200,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "forex":
         await query.edit_message_text("Select Pair:", reply_markup=forex_menu())
 
-    elif data in ["EURUSD", "GBPUSD", "USDJPY", "USDCHF",
-    "AUDUSD", "USDCAD", "NZDUSD",
-    "EURGBP", "EURJPY", "GBPJPY",
-    "EURCHF", "AUDJPY", "GBPCHF"]:
+    elif data in PAIRS:
         await query.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu(data))
 
     elif "_" in data:
