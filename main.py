@@ -138,6 +138,12 @@ from telegram import ReplyKeyboardMarkup
 from telegram.ext import MessageHandler, filters
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    if user_id not in ALLOWED_USERS:
+        await update.message.reply_text("⛔ Access Denied")
+        return
+
     keyboard = [["🚀 Start Bot"]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -146,6 +152,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id  # 👈 ADD THIS
+
+    # 🔒 BLOCK UNAUTHORIZED USERS
+    if user_id not in ALLOWED_USERS:
+        return
+
     if update.message.text == "🚀 Start Bot":
         await update.message.reply_text(
             "🚀 Welcome to Sigma AI Bot",
@@ -155,6 +167,13 @@ async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    user_id = query.from_user.id   # 👈 ADD THIS
+
+    # 🔒 BLOCK UNAUTHORIZED USERS
+    if user_id not in ALLOWED_USERS:
+        await query.answer("⛔ Access Denied", show_alert=True)
+        return
+
     await query.answer()
 
     data = query.data
