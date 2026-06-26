@@ -118,13 +118,26 @@ def generate_signal(pair, timeframe):
         elif price < ema20 and htf_price < htf_ema:
             sell_conditions += 1
 
-        # Final signal
-        if buy_conditions >= 3:
+        # === FINAL DECISION WITH FILTER ===
+        if buy_conditions >= 2 and is_trending and not is_sideways and rsi_safe_buy:
             signal = "BUY"
-        elif sell_conditions >= 3:
+            warning = "✅ Strong Trend - Safe to BUY"
+
+        elif sell_conditions >= 2 and is_trending and not is_sideways and rsi_safe_sell:
             signal = "SELL"
+            warning = "✅ Strong Trend - Safe to SELL"
+
+        elif not is_trending:
+            signal = "HOLD"
+            warning = "⚠️ Weak Trend (ADX too low) - Avoid Trading"
+
+        elif is_sideways:
+            signal = "HOLD"
+            warning = "⚠️ Sideways Market - No Trade Zone"
+
         else:
             signal = "HOLD"
+            warning = "⚠️ Unclear Setup - Stay Out"
 
         return f"""
 📊 Sigma AI Trade
@@ -138,6 +151,8 @@ def generate_signal(pair, timeframe):
 EMA20: {round(ema20,2)}
 EMA50: {round(ema50,2)}
 ADX: {round(adx,2)}
+
+⚠️ Status: {warning}
 
 ⚡ Powered by TradingView
 """
