@@ -68,8 +68,8 @@ def generate_signal(pair, timeframe):
             "15m": Interval.INTERVAL_15_MINUTES
         }
 
-    import time
-        time.sleep(1)
+import time
+    time.sleep(1)
         
         analysis = get_analysis(pair, interval_map[timeframe])
 
