@@ -49,23 +49,29 @@ def timeframe_menu(pair):
 # ================= SIGNAL =================
 
 def get_analysis(symbol, interval):
-    handler = TA_Handler(
-        symbol=pair.replace("/", ""),
-        screener="forex",
-        exchange="OANDA",
-        interval=interval
-    )
+def get_analysis(pair, interval):
+    try:
+        handler = TA_Handler(
+            symbol=pair.replace("/", ""),   # ✅ FIX FORMAT
+            exchange="OANDA",               # ✅ STABLE
+            screener="forex",
+            interval=interval              # ✅ MUST be Interval
+        )
 
-    analysis = handler.get_analysis()
-    return analysis
+        analysis = handler.get_analysis()
+        return analysis
+
+    except Exception as e:
+        print(f"ERROR: {pair} | {interval} | {e}")
+        return None
 
 
 def generate_signal(pair, timeframe):
     try:
-        interval_map = {
-            "1m": Interval.INTERVAL_1_MINUTE,
-            "5m": Interval.INTERVAL_5_MINUTES,
-            "15m": Interval.INTERVAL_15_MINUTES
+        timeframes = {
+        "1m": Interval.INTERVAL_1_MINUTE,
+        "5m": Interval.INTERVAL_5_MINUTES,
+        "15m": Interval.INTERVAL_15_MINUTES
         }
 
         import time
