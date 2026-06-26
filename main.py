@@ -52,7 +52,7 @@ def get_analysis(pair, interval):
     try:
         handler = TA_Handler(
             symbol=pair.replace("/", ""),   # ✅ FIX FORMAT
-            exchange="OANDA",               # ✅ STABLE
+            exchange="FX_IDC",               # ✅ STABLE
             screener="forex",
             interval=interval              # ✅ MUST be Interval
         )
