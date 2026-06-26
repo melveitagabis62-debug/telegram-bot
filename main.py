@@ -71,61 +71,59 @@ def generate_signal(pair, timeframe):
 
         rsi = analysis.indicators["RSI"]
         macd = analysis.indicators["MACD.macd"]
-        ema = analysis.indicators["EMA20"]
+        ema50 = analysis.indicators["EMA50"]
         price = analysis.indicators["close"]
 
-        # 🔥 Confluence-based logic (FIXED POSITION)
-        buy_conditions = 0
-        sell_conditions = 0
+        # ================= STRATEGY LOGIC =================
 
-        # RSI
-        if rsi < 30:
-            buy_conditions += 1
-        elif rsi > 70:
-            sell_conditions += 1
+        signal = "HOLD"
+        warning = ""
 
-        # MACD
-        if macd > 0:
-            buy_conditions += 1
-        else:
-            sell_conditions += 1
+        # 🔥 Detect strong trend (avoid trading)
+        if abs(price - ema50) > (price * 0.002):  # far from EMA = strong trend
+            warning = "⚠️ Strong trend detected → DO NOT TRADE"
 
-        # EMA Trend
-        if price > ema:
-            buy_conditions += 1
-        else:
-            sell_conditions += 1
-
-        # FINAL SIGNAL
-        if buy_conditions >= 2:
+        # 🟢 BUY (mean reversion)
+        elif rsi < 30 and price >= ema50 * 0.995:
             signal = "BUY"
-        elif sell_conditions >= 2:
+
+        # 🔴 SELL (mean reversion)
+        elif rsi > 70 and price <= ema50 * 1.005:
             signal = "SELL"
+
         else:
             signal = "HOLD"
+            warning = "⚠️ No clean setup → WAIT"
 
-        # 🔥 Add this
+        # ================= DISPLAY =================
+
         if signal == "BUY":
-            signal_display = "🟢 BUY"
+            signal_display = "🟢 BUY (CALL)"
         elif signal == "SELL":
-            signal_display = "🔴 SELL"
+            signal_display = "🔴 SELL (PUT)"
         else:
             signal_display = "🟡 HOLD"
 
         return f"""
-📊 Sigma AI Trade
+📊 Sigma AI Smart Signal
 
 💱 Pair: {pair}
 ⏱ Timeframe: {timeframe}
 
 📈 Signal: {signal_display}
 
-🧠 Indicators:
-RSI: {round(rsi,2)}
-MACD: {round(macd,2)}
-EMA20: {round(ema,2)}
+{warning}
 
-⚡ Powered by TradingView
+🧠 Strategy:
+• Mean Reversion (No Chase)
+• RSI + EMA50 Filter
+
+📊 Indicators:
+RSI: {round(rsi,2)}
+EMA50: {round(ema50,2)}
+Price: {round(price,5)}
+
+⛔ Avoid trading during strong trends!
 """
 
     except Exception as e:
