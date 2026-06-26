@@ -191,61 +191,53 @@ async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    user_id = query.from_user.id   # 👈 ADD THIS
+    await query.answer()
 
-    # 🔒 BLOCK UNAUTHORIZED USERS
+    user_id = query.from_user.id
+
     if user_id not in ALLOWED_USERS:
         await query.answer("⛔ Access Denied", show_alert=True)
         return
 
-    # ✅ FIXED TIMEFRAME
-    TIMEFRAME_MAP = {
-        "1m": "1minute",
-        "5m": "5minute",
-        "15m": "15minute"
-    }
+    data = query.data  # ✅ GET DATA FIRST
 
-    timeframe = TIMEFRAME_MAP.get(query.data, "1minute")
-
-    pair = "EURUSD"  # or your selected pair
-
-    try:
-        result = generate_signal(pair, timeframe)
-        await query.message.reply_text(result)
-
-    except Exception as e:
-        print("ERROR:", e)
-        await query.message.reply_text("❌ Failed to fetch data")
-
-    await query.answer()
-
-    data = query.data
-
+    # 🟢 MAIN MENU
     if data == "forex":
         await query.edit_message_text("Select Pair:", reply_markup=forex_menu())
 
+    # 🟢 PAIR SELECTED
     elif data in PAIRS:
-        await query.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu(data))
+        await query.edit_message_text(
+            "Select Timeframe:",
+            reply_markup=timeframe_menu(data)
+        )
 
+    # 🔥 FINAL STEP (PAIR + TIMEFRAME)
     elif "_" in data:
-        pair, tf = data.split("_")
+        pair, timeframe = data.split("_")  # ✅ IMPORTANT
 
-        result = generate_signal(pair, tf)
+        try:
+            result = generate_signal(pair, timeframe)
+            await query.edit_message_text(result)
 
-        await query.edit_message_text(result)
+        except Exception as e:
+            print("ERROR:", e)
+            await query.edit_message_text("❌ Failed to fetch data")
 
+    # 🔙 BACK BUTTONS
     elif data == "back_main":
         await query.edit_message_text(
-        "🚀 Welcome to Sigma AI Bot",
-        reply_markup=main_menu()
-    )
+            "🚀 Welcome to Sigma AI Bot",
+            reply_markup=main_menu()
+        )
 
     elif data == "back_forex":
         await query.edit_message_text(
-        "Select Pair:",
-        reply_markup=forex_menu()
-    )
+            "Select Pair:",
+            reply_markup=forex_menu()
+        )
 
 async def auto_signal(context: ContextTypes.DEFAULT_TYPE):
     for pair in PAIRS:
