@@ -29,7 +29,6 @@ def forex_menu():
         [InlineKeyboardButton("USD/CHF", callback_data="USDCHF")],
         [InlineKeyboardButton("NZD/USD", callback_data="NZDUSD")],
         [InlineKeyboardButton("EUR/JPY", callback_data="EURJPY")],
-        [InlineKeyboardButton("EUR/AUD", callback_data="EURAUD")],
         [InlineKeyboardButton("GBP/JPY", callback_data="GBPJPY")],
         [InlineKeyboardButton("⬅️ Back", callback_data="back_main")],
     ]
@@ -48,105 +47,70 @@ def timeframe_menu(pair):
 
 # ================= SIGNAL =================
 
-def get_analysis(pair, interval):
-    try:
-        handler = TA_Handler(
-            symbol=pair.replace("/", ""),   # ✅ FIX FORMAT
-            exchange="FX_IDC",               # ✅ STABLE
-            screener="forex",
-            interval=interval              # ✅ MUST be Interval
-        )
+def get_analysis(symbol, interval):
+    handler = TA_Handler(
+        symbol=symbol,
+        screener="forex",
+        exchange="FX_IDC",
+        interval=interval
+    )
 
-        analysis = handler.get_analysis()
-        return analysis
-
-    except Exception as e:
-        print(f"ERROR: {pair} | {interval} | {e}")
-        return None
+    analysis = handler.get_analysis()
+    return analysis
 
 
 def generate_signal(pair, timeframe):
     try:
-        timeframes = {
-        "1m": Interval.INTERVAL_1_MINUTE,
-        "5m": Interval.INTERVAL_5_MINUTES,
-        "15m": Interval.INTERVAL_15_MINUTES
+        interval_map = {
+            "1m": Interval.INTERVAL_1_MINUTE,
+            "5m": Interval.INTERVAL_5_MINUTES,
+            "15m": Interval.INTERVAL_15_MINUTES
         }
 
-        import time
-        time.sleep(1)
-        
         analysis = get_analysis(pair, interval_map[timeframe])
 
         rsi = analysis.indicators["RSI"]
         macd = analysis.indicators["MACD.macd"]
-        macd_signal = analysis.indicators["MACD.signal"]
-        ema20 = analysis.indicators["EMA20"]
-        ema50 = analysis.indicators["EMA50"]
-        adx = analysis.indicators["ADX"]
+        ema = analysis.indicators["EMA20"]
         price = analysis.indicators["close"]
 
+        # 🔥 Confluence-based logic (FIXED POSITION)
         buy_conditions = 0
         sell_conditions = 0
-        
-          # === MARKET QUALITY FILTER ===
-        is_trending = adx > 20
-        is_sideways = abs(ema20 - ema50) < 0.1
-        rsi_safe_buy = rsi < 70
-        rsi_safe_sell = rsi > 30
-         
-          # 🚫 Avoid weak trends
-        if adx < 20:
-            return "🟡 HOLD (Weak Trend)"
 
-          # RSI Momentum
-        if 30 < rsi < 60:
+        # RSI
+        if rsi < 30:
             buy_conditions += 1
-        elif 40 < rsi < 70:
+        elif rsi > 70:
             sell_conditions += 1
 
-        # MACD crossover
-        if macd > macd_signal:
+        # MACD
+        if macd > 0:
             buy_conditions += 1
         else:
             sell_conditions += 1
 
-        # Trend confirmation
-        if price > ema20 and price > ema50:
+        # EMA Trend
+        if price > ema:
             buy_conditions += 1
-        elif price < ema20 and price < ema50:
+        else:
             sell_conditions += 1
 
-         # Multi-timeframe confirmation
-        higher_tf = get_analysis(pair, Interval.INTERVAL_5_MINUTES)
-        htf_price = higher_tf.indicators["close"]
-        htf_ema = higher_tf.indicators["EMA20"]
-
-        if price > ema20 and htf_price > htf_ema:
-            buy_conditions += 1
-        elif price < ema20 and htf_price < htf_ema:
-            sell_conditions += 1
-
-        # === FINAL DECISION WITH FILTER ===
-        if buy_conditions >= 2 and is_trending and not is_sideways and rsi_safe_buy:
+        # FINAL SIGNAL
+        if buy_conditions >= 2:
             signal = "BUY"
-            warning = "✅ Strong Trend - Safe to BUY"
-
-        elif sell_conditions >= 2 and is_trending and not is_sideways and rsi_safe_sell:
+        elif sell_conditions >= 2:
             signal = "SELL"
-            warning = "✅ Strong Trend - Safe to SELL"
-
-        elif not is_trending:
-            signal = "HOLD"
-            warning = "⚠️ Weak Trend (ADX too low) - Avoid Trading"
-
-        elif is_sideways:
-            signal = "HOLD"
-            warning = "⚠️ Sideways Market - No Trade Zone"
-
         else:
             signal = "HOLD"
-            warning = "⚠️ Unclear Setup - Stay Out"
+
+        # 🔥 Add this
+        if signal == "BUY":
+            signal_display = "🟢 BUY"
+        elif signal == "SELL":
+            signal_display = "🔴 SELL"
+        else:
+            signal_display = "🟡 HOLD"
 
         return f"""
 📊 Sigma AI Trade
@@ -157,11 +121,9 @@ def generate_signal(pair, timeframe):
 📈 Signal: {signal_display}
 
 🧠 Indicators:
-EMA20: {round(ema20,2)}
-EMA50: {round(ema50,2)}
-ADX: {round(adx,2)}
-
-⚠️ Status: {warning}
+RSI: {round(rsi,2)}
+MACD: {round(macd,2)}
+EMA20: {round(ema,2)}
 
 ⚡ Powered by TradingView
 """
@@ -204,7 +166,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data in ["EURUSD", "GBPUSD", "USDJPY", "USDCHF",
     "AUDUSD", "USDCAD", "NZDUSD",
     "EURGBP", "EURJPY", "GBPJPY",
-    "EURCHF", "AUDJPY", "GBPCHF", "EURAUD"]:
+    "EURCHF", "AUDJPY", "GBPCHF"]:
         await query.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu(data))
 
     elif "_" in data:
