@@ -7,6 +7,7 @@ import logging
 import os
 
 TOKEN = os.getenv("TOKEN")
+ALLOWED_USERS = [6351041498]  # replace with your Telegram ID
 
 # ================= MENU =================
 
