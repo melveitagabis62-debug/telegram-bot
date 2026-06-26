@@ -20,11 +20,6 @@ PAIRS = [
     "CADCHF"
 ]
 
-AUTO_TIMEFRAME = "1m"   # you can change to 5m
-SCAN_INTERVAL = 60      # seconds
-
-last_signals = {}  # prevent spam
-
 # ================= MENU =================
 
 def main_menu():
@@ -54,7 +49,7 @@ def forex_menu():
         keyboard.append(row)
 
     keyboard.append([
-        InlineKeyboardButton("⬅️ Back", callback_data="back_main")
+        InlineKeyboardButton("⬅️ Back", callback_data="back")
     ])
 
     return InlineKeyboardMarkup(keyboard)
@@ -98,7 +93,6 @@ def generate_signal(pair, timeframe):
         macd = analysis.indicators["MACD.macd"]
         ema50 = analysis.indicators["EMA50"]
         price = analysis.indicators["close"]
-        
 
         # ================= STRATEGY LOGIC =================
 
@@ -192,75 +186,41 @@ async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    user_id = query.from_user.id   # 👈 ADD THIS
 
-    user_id = query.from_user.id
-
+    # 🔒 BLOCK UNAUTHORIZED USERS
     if user_id not in ALLOWED_USERS:
         await query.answer("⛔ Access Denied", show_alert=True)
         return
 
-    data = query.data  # ✅ GET DATA FIRST
+    await query.answer()
 
-    # 🟢 MAIN MENU
+    data = query.data
+
     if data == "forex":
         await query.edit_message_text("Select Pair:", reply_markup=forex_menu())
 
-    # 🟢 PAIR SELECTED
     elif data in PAIRS:
-        await query.edit_message_text(
-            "Select Timeframe:",
-            reply_markup=timeframe_menu(data)
-        )
+        await query.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu(data))
 
-    # 🔥 FINAL STEP (PAIR + TIMEFRAME)
-    elif any(tf in data for tf in ["_1m", "_5m", "_15m"]):
-        pair, timeframe = data.split("_")  # ✅ IMPORTANT
+    elif "_" in data:
+        pair, tf = data.split("_")
 
-        try:
-            result = generate_signal(pair, timeframe)
-            await query.edit_message_text(result)
+        result = generate_signal(pair, tf)
 
-        except Exception as e:
-            print("ERROR:", e)
-            await query.edit_message_text("❌ Failed to fetch data")
+        await query.edit_message_text(result)
 
-    # 🔙 BACK BUTTONS
     elif data == "back_main":
         await query.edit_message_text(
-            "🚀 Welcome to Sigma AI Bot",
-            reply_markup=main_menu()
-        )
+        "🚀 Welcome to Sigma AI Bot",
+        reply_markup=main_menu()
+    )
 
     elif data == "back_forex":
         await query.edit_message_text(
-            "Select Pair:",
-            reply_markup=forex_menu()
-        )
-
-async def auto_signal(context: ContextTypes.DEFAULT_TYPE):
-    for pair in PAIRS:
-        try:  # ✅ INDENTED
-
-            result = generate_signal(pair, AUTO_TIMEFRAME)
-
-            # 🔥 Only send BUY or SELL
-            if "BUY" in result or "SELL" in result:
-
-                # 🚫 prevent duplicate spam
-                if last_signals.get(pair) == result:
-                    continue
-
-                last_signals[pair] = result
-
-                # 📩 send to your Telegram
-                await context.bot.send_message(
-                    chat_id=ALLOWED_USERS[0],
-                    text=f"🚨 AUTO SIGNAL\n\n{result}"
-                )
-
-        except Exception as e:  # ✅ same level as try
-            print("AUTO ERROR:", e)
+        "Select Pair:",
+        reply_markup=forex_menu()
+    )
 
 # ================= RUN =================
 
@@ -271,5 +231,5 @@ app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT, start_button))
 
 print("Bot running...")
-app.job_queue.run_repeating(auto_signal, interval=SCAN_INTERVAL, first=10)
 app.run_polling()
+            
