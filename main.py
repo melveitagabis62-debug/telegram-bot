@@ -120,7 +120,7 @@ def get_analysis(symbol, interval):
     return analysis
 
 
-# 🔥🔥 PRO STRATEGY (UPGRADED ONLY HERE — NOTHING ELSE CHANGED)
+# 🔥🔥 PRO+ STRATEGY (UPGRADED)
 def generate_signal(pair, timeframe):
     try:
         interval_map = {
@@ -135,128 +135,131 @@ def generate_signal(pair, timeframe):
         ema50 = analysis.indicators["EMA50"]
         price = analysis.indicators["close"]
         open_price = analysis.indicators["open"]
+        high = analysis.indicators["high"]
+        low = analysis.indicators["low"]
 
         signal = "HOLD"
         warning = ""
         entry_price = None
         direction = ""
 
-        # ================= EXTRA CALCULATIONS =================
-        distance_from_ema = abs(price - ema50) / price
-        candle_body = abs(price - open_price)
+        # ================= MULTI TIMEFRAME =================
+        def get_trend(tf):
+            a = get_analysis(pair, interval_map[tf])
+            if a.indicators["close"] > a.indicators["EMA50"]:
+                return "UP"
+            else:
+                return "DOWN"
 
-        # 🔥 CRYPTO TUNING
-        if "BTC" in pair:
-            overbought = 75
-            oversold = 25
-            trend_rsi = 55
-        else:
-            overbought = 70
-            oversold = 30
-            trend_rsi = 50
+        trend_1m = get_trend("1m")
+        trend_5m = get_trend("5m")
+        trend_15m = get_trend("15m")
+
+        if not (trend_1m == trend_5m == trend_15m):
+            return f"""
+📊 **Sigma AI Signal (PRO+)**
+
+💱 Pair: **{pair}**
+⏱ Timeframe: **{timeframe}**
+
+⛔ No Trade
+❌ Timeframes not aligned
+"""
+
+        # ================= SUPPORT / RESISTANCE =================
+        support = low
+        resistance = high
+
+        near_support = abs(price - support) / price < 0.0015
+        near_resistance = abs(price - resistance) / price < 0.0015
 
         # ================= NO TRADE ZONE =================
         if 45 < rsi < 55:
             return f"""
-📊 **Sigma AI Signal**
+📊 **Sigma AI Signal (PRO+)**
 
 💱 Pair: **{pair}**
 ⏱ Timeframe: **{timeframe}**
 
 🟡 HOLD
-
-⛔ No-trade zone (RSI sideways)
+⛔ RSI sideways
 """
 
-        # ================= FAKE BREAKOUT DETECTION =================
-        fake_breakout = False
-
-        if price > ema50 and rsi < trend_rsi:
-            fake_breakout = True
-
-        if price < ema50 and rsi > trend_rsi:
-            fake_breakout = True
-
-        if fake_breakout:
+        # ================= FAKE BREAKOUT =================
+        if price > ema50 and rsi < 50:
             return f"""
-📊 **Sigma AI Signal**
-
-💱 Pair: **{pair}**
-⏱ Timeframe: **{timeframe}**
+📊 **Sigma AI Signal (PRO+)**
 
 ⛔ Fake breakout detected
-❌ Avoid entry
 """
 
-        # ================= HIGH VOLATILITY =================
-        if distance_from_ema > 0.003:
-            warning = "⚠️ Market too extended → wait pullback"
+        if price < ema50 and rsi > 50:
+            return f"""
+📊 **Sigma AI Signal (PRO+)**
+
+⛔ Fake breakout detected
+"""
 
         # ================= STRATEGY =================
-
-        if rsi <= oversold:
+        if rsi < 30 and near_support:
             signal = "BUY"
             direction = "CALL"
 
-        elif rsi >= overbought:
+        elif rsi > 70 and near_resistance:
             signal = "SELL"
             direction = "PUT"
 
-        elif price > ema50 and rsi > trend_rsi:
+        elif trend_1m == "UP":
             signal = "BUY"
             direction = "CALL"
 
-        elif price < ema50 and rsi < trend_rsi:
+        elif trend_1m == "DOWN":
             signal = "SELL"
             direction = "PUT"
 
-        else:
-            signal = "HOLD"
-
-        # ================= CANDLE CONFIRMATION =================
+        # ================= RETEST ENTRY =================
         if signal != "HOLD":
-            if candle_body < (price * 0.0005):
+            if abs(price - ema50) / price > 0.002:
                 return f"""
-📊 **Sigma AI Signal**
+📊 **Sigma AI Signal (PRO+)**
 
 💱 Pair: **{pair}**
 ⏱ Timeframe: **{timeframe}**
 
-⚠️ Weak candle
-⏳ Wait for confirmation candle
+⏳ Wait for retest to EMA50
 """
 
-        # ================= FINAL OUTPUT =================
-
+        # ================= FINAL =================
         if signal == "BUY":
             entry_price = round(price, 5)
-            signal_display = "🟢 BUY / CALL"
-            entry_text = f"📍 Enter CALL at **{entry_price}**\n→ Confirm next candle"
+            result = f"🟢 BUY @ {entry_price}"
 
         elif signal == "SELL":
             entry_price = round(price, 5)
-            signal_display = "🔴 SELL / PUT"
-            entry_text = f"📍 Enter PUT at **{entry_price}**\n→ Confirm next candle"
+            result = f"🔴 SELL @ {entry_price}"
 
         else:
-            signal_display = "🟡 HOLD"
-            entry_text = "⛔ Do not trade"
+            result = "🟡 HOLD"
+
+        # ================= LOGGING =================
+        try:
+            with open("trades.txt", "a") as f:
+                f.write(f"{pair} | {timeframe} | {signal} | {price}\n")
+        except:
+            pass
 
         return f"""
-📊 **Sigma AI Signal (PRO)**
+📊 **Sigma AI Signal (PRO+)**
 
 💱 Pair: **{pair}**
 ⏱ Timeframe: **{timeframe}**
 
-📈 Signal: **{signal_display}**
+📈 {result}
 
-{entry_text}
+📊 RSI: {round(rsi,2)}
+📊 EMA50: {round(ema50,5)}
 
-{warning}
-
-📊 RSI: `{round(rsi, 2)}`
-📊 EMA50: `{round(ema50, 5)}`
-📊 Price: `{round(price, 5)}`
+📊 Trend Alignment: {trend_1m} / {trend_5m} / {trend_15m}
 """
 
     except Exception as e:
