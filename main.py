@@ -68,10 +68,10 @@ def get_analysis(symbol, interval):
     return handler.get_analysis()
 
 
-# ================= SIGNAL ENGINE =================
-
 def generate_signal(pair, timeframe):
     try:
+        from datetime import datetime
+
         interval_map = {
             "1m": Interval.INTERVAL_1_MINUTE,
             "5m": Interval.INTERVAL_5_MINUTES,
@@ -87,13 +87,14 @@ def generate_signal(pair, timeframe):
         high = analysis.indicators.get("high", price)
         low = analysis.indicators.get("low", price)
 
-        # 🔥 Higher timeframe (15m)
+        # 🔥 Higher timeframe
         htf = get_analysis(pair, Interval.INTERVAL_15_MINUTES)
         htf_rsi = htf.indicators["RSI"]
 
         signal = "HOLD"
         warning = ""
         entry_price = None
+        confidence = 0
 
         # ================= TREND =================
         if ema50 > ema200:
@@ -103,115 +104,65 @@ def generate_signal(pair, timeframe):
         else:
             trend = "SIDEWAYS"
 
-        # ================= NO TRADE =================
+        # ================= NO TRADE ZONE =================
         if 45 < rsi < 55:
+            return "🟡 HOLD\n⚠️ Market is ranging"
+
+        # ================= BUY =================
+        if trend == "UPTREND" and rsi < 35 and htf_rsi < 40:
+            signal = "BUY"
+            entry_price = price
+            confidence = 80
+
+        # ================= SELL =================
+        elif trend == "DOWNTREND" and rsi > 65 and htf_rsi > 60:
+            signal = "SELL"
+            entry_price = price
+            confidence = 80
+
+        # ================= EXTRA FILTERS =================
+        if signal != "HOLD":
+            if abs(price - high) < 0.0003:
+                warning = "⚠️ Near resistance"
+                confidence -= 10
+
+            if abs(price - low) < 0.0003:
+                warning = "⚠️ Near support"
+                confidence -= 10
+
+            if trend == "UPTREND" and htf_rsi > 70:
+                warning = "⚠️ HTF overbought"
+                confidence -= 15
+
+            if trend == "DOWNTREND" and htf_rsi < 30:
+                warning = "⚠️ HTF oversold"
+                confidence -= 15
+
+        # ================= TIME =================
+        now = datetime.utcnow()
+        seconds = now.second
+        remaining = 60 - seconds
+
+        # ================= RESULT =================
+        if signal == "HOLD":
             return f"""
-🟡 NO TRADE
-
-💱 {pair} | {timeframe}
-⚠️ Market is sideways
-
-📊 RSI: {round(rsi,2)}
+🟡 HOLD
+📊 Trend: {trend}
+⏳ Next Candle: {remaining}s
 """
 
-        # ================= SIGNAL =================
-        if rsi < 32 and price >= ema50 * 0.993:
-            signal = "BUY"
-            entry_price = round(max(price, ema50 * 0.997), 5)
-
-        elif rsi > 68 and price <= ema50 * 1.007:
-            signal = "SELL"
-            entry_price = round(min(price, ema50 * 1.003), 5)
-
-        else:
-            signal = "HOLD"
-            warning = "⚠️ Weak setup"
-
-        # ================= TREND FILTER =================
-        if signal == "BUY" and trend == "DOWNTREND":
-            signal = "HOLD"
-            warning += "\n⚠️ Against downtrend"
-
-        if signal == "SELL" and trend == "UPTREND":
-            signal = "HOLD"
-            warning += "\n⚠️ Against uptrend"
-
-        # ================= SUPPORT/RESISTANCE =================
-        if signal == "BUY" and price > high * 0.995:
-            signal = "HOLD"
-            warning += "\n⚠️ Near resistance"
-
-        if signal == "SELL" and price < low * 1.005:
-            signal = "HOLD"
-            warning += "\n⚠️ Near support"
-
-        # ================= HTF CONFIRM =================
-        if signal == "BUY" and htf_rsi < 50:
-            signal = "HOLD"
-            warning += "\n⚠️ HTF bearish"
-
-        if signal == "SELL" and htf_rsi > 50:
-            signal = "HOLD"
-            warning += "\n⚠️ HTF bullish"
-
-        # ================= CONFIDENCE =================
-        confidence = 50
-
-        if signal == "BUY":
-            if rsi < 25:
-                confidence += 25
-            if abs(price - ema50) < price * 0.002:
-                confidence += 15
-
-        if signal == "SELL":
-            if rsi > 75:
-                confidence += 25
-            if abs(price - ema50) < price * 0.002:
-                confidence += 15
-
-        confidence = min(confidence, 95)
-
-        # ================= TIMER =================
-        seconds = int(time.time()) % 60
-        countdown = 60 - seconds
-
-        # ================= DISPLAY =================
-        if signal == "BUY":
-            signal_text = "🟢 BUY / CALL"
-            entry = f"📍 Entry: {entry_price} or next candle"
-        elif signal == "SELL":
-            signal_text = "🔴 SELL / PUT"
-            entry = f"📍 Entry: {entry_price} or next candle"
-        else:
-            signal_text = "🟡 HOLD"
-            entry = "⛔ No trade"
-
         return f"""
-📊 **Sigma AI PRO Signal**
-
-💱 Pair: **{pair}**
-⏱ Timeframe: **{timeframe}**
-
-📈 Signal: **{signal_text}**
-🔥 Confidence: **{confidence}%**
-
-{entry}
-
-📊 Trend: **{trend}**
-⏳ Next Candle: **{countdown}s**
-
+📊 SIGNAL: {signal}
+💰 Entry: {entry_price}
+🔥 Confidence: {confidence}%
+📊 Trend: {trend}
+⏳ Next Candle: {remaining}s
 {warning}
-
-📊 Indicators:
-• RSI: {round(rsi,2)}
-• EMA50: {round(ema50,5)}
-• EMA200: {round(ema200,5)}
-• Price: {round(price,5)}
 """
 
     except Exception as e:
-        print("ERROR:", e)
-        return "❌ Failed to fetch data."
+        return f"Error: {str(e)}"
+
 
 # ================= HANDLERS =================
 
