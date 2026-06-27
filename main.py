@@ -6,7 +6,7 @@ import logging
 import os
 
 TOKEN = os.getenv("TOKEN")
-ALLOWED_USERS = [6351041498]  # replace with your Telegram ID
+ALLOWED_USERS = [6351041498]
 
 # ================= PAIRS =================
 
@@ -20,7 +20,6 @@ PAIRS = [
     "CADCHF"
 ]
 
-# 🔥 NEW: CRYPTO PAIRS (INCLUDING BITCOIN)
 CRYPTO_PAIRS = [
     "BTCUSDT",
     "ETHUSDT",
@@ -64,7 +63,6 @@ def forex_menu():
     return InlineKeyboardMarkup(keyboard)
 
 
-# 🔥 NEW: CRYPTO MENU
 def crypto_menu():
     keyboard = []
     row = []
@@ -101,7 +99,6 @@ def timeframe_menu(pair):
 
 # ================= SIGNAL =================
 
-# 🔥 UPDATED: SUPPORT FOREX + CRYPTO
 def get_analysis(symbol, interval):
     if "USDT" in symbol:
         handler = TA_Handler(
@@ -122,6 +119,7 @@ def get_analysis(symbol, interval):
     return analysis
 
 
+# 🔥🔥 UPDATED LOGIC HERE (REVERSAL + TREND)
 def generate_signal(pair, timeframe):
     try:
         interval_map = {
@@ -145,26 +143,44 @@ def generate_signal(pair, timeframe):
         if distance_from_ema > 0.0028:
             warning = "⚠️ Strong trend or volatile market → HIGH RISK"
 
-        if rsi < 32 and price >= ema50 * 0.993:
+        # ================= STRATEGY =================
+
+        # 🔥 1. REVERSAL (HIGH ACCURACY)
+        if rsi <= 30:
             signal = "BUY"
             direction = "CALL"
-            entry_price = round(max(price, ema50 * 0.997), 5)
+            entry_price = round(price, 5)
 
-        elif rsi > 68 and price <= ema50 * 1.007:
+        elif rsi >= 70:
             signal = "SELL"
             direction = "PUT"
-            entry_price = round(min(price, ema50 * 1.003), 5)
+            entry_price = round(price, 5)
+
+        # 🔥 2. TREND (MORE SIGNALS)
+        elif price > ema50 and rsi > 50:
+            signal = "BUY"
+            direction = "CALL"
+            entry_price = round(price, 5)
+
+        elif price < ema50 and rsi < 50:
+            signal = "SELL"
+            direction = "PUT"
+            entry_price = round(price, 5)
 
         else:
             signal = "HOLD"
             warning = "⚠️ Market is not good → Don't Trade"
 
+        # ================= DISPLAY =================
+
         if signal == "BUY":
             signal_display = f"🟢 BUY / CALL"
             entry_text = f"📍 Enter **CALL** at **{entry_price}**\n→ Or wait next candle"
+
         elif signal == "SELL":
             signal_display = f"🔴 SELL / PUT"
             entry_text = f"📍 Enter **PUT** at **{entry_price}**\n→ Or wait next candle"
+
         else:
             signal_display = "🟡 HOLD"
             entry_text = "⛔ Do not trade"
@@ -189,92 +205,3 @@ def generate_signal(pair, timeframe):
     except Exception as e:
         print("ERROR:", e)
         return "❌ Failed to fetch data."
-
-# ================= HANDLERS =================
-
-from telegram import ReplyKeyboardMarkup
-from telegram.ext import MessageHandler, filters
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-
-    if user_id not in ALLOWED_USERS:
-        await update.message.reply_text("⛔ Access Denied")
-        return
-
-    keyboard = [["🚀 Start Bot"]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
-    await update.message.reply_text(
-        "👋 Welcome! Click below:",
-        reply_markup=reply_markup
-    )
-
-
-async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-
-    if user_id not in ALLOWED_USERS:
-        return
-
-    if update.message.text == "🚀 Start Bot":
-        await update.message.reply_text(
-            "🚀 Sigma AI Bot",
-            reply_markup=main_menu()
-        )
-
-
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-
-    if user_id not in ALLOWED_USERS:
-        await query.answer("⛔ Access Denied", show_alert=True)
-        return
-
-    await query.answer()
-    data = query.data
-
-    if data == "forex":
-        await query.edit_message_text("Select Pair:", reply_markup=forex_menu())
-
-    elif data == "crypto":
-        await query.edit_message_text("Select Crypto:", reply_markup=crypto_menu())
-
-    elif data in PAIRS:
-        await query.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu(data))
-
-    elif data.startswith("crypto_"):
-        pair = data.replace("crypto_", "")
-        await query.edit_message_text(
-            "Select Timeframe:",
-            reply_markup=timeframe_menu(pair)
-        )
-
-    elif "_" in data:
-        pair, tf = data.split("_")
-        result = generate_signal(pair, tf)
-        await query.edit_message_text(result)
-
-    elif data == "back_main":
-        await query.edit_message_text(
-            "🚀 Sigma AI Bot",
-            reply_markup=main_menu()
-        )
-
-    elif data == "back_forex":
-        await query.edit_message_text(
-            "Select Pair:",
-            reply_markup=forex_menu()
-        )
-
-# ================= RUN =================
-
-app = ApplicationBuilder().token(TOKEN).build()
-
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(button_handler))
-app.add_handler(MessageHandler(filters.TEXT, start_button))
-
-print("Bot running...")
-app.run_polling()
