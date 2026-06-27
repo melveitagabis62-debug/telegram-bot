@@ -169,7 +169,12 @@ def generate_signal(pair, timeframe):
 distance_from_ema = abs(price - ema50) / price
 
         if distance_from_ema > (0.004 if is_crypto else 0.003):
-        return f"""
+       
+    except Exception as e:
+        print(e)
+        return "Error occurred"
+           
+            return f"""
 📊 **Sigma AI Signal**
 
 💱 Pair: **{pair}**
