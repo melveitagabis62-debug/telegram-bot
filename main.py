@@ -3,11 +3,12 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 
 from tradingview_ta import TA_Handler, Interval
 import logging
-
 import os
 
 TOKEN = os.getenv("TOKEN")
-ALLOWED_USERS = [6351041498]
+ALLOWED_USERS = [6351041498]  # replace with your Telegram ID
+
+# ================= PAIRS =================
 
 PAIRS = [
     "EURUSD", "GBPUSD", "USDJPY", "AUDUSD",
@@ -19,11 +20,13 @@ PAIRS = [
     "CADCHF"
 ]
 
-# 🔥 OTC PAIRS
-OTC_PAIRS = [
-    "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC",
-    "AUDUSD-OTC", "USDCAD-OTC", "USDCHF-OTC",
-    "NZDUSD-OTC"
+# 🔥 NEW: CRYPTO PAIRS (INCLUDING BITCOIN)
+CRYPTO_PAIRS = [
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "XRPUSDT"
 ]
 
 # ================= MENU =================
@@ -31,7 +34,6 @@ OTC_PAIRS = [
 def main_menu():
     keyboard = [
         [InlineKeyboardButton("📊 Forex", callback_data="forex")],
-        [InlineKeyboardButton("🟣 OTC Market", callback_data="otc")],
         [InlineKeyboardButton("💰 Crypto", callback_data="crypto")]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -43,29 +45,9 @@ def forex_menu():
 
     for i, pair in enumerate(PAIRS, 1):
         display = pair[:3] + "/" + pair[3:]
-        row.append(InlineKeyboardButton(display, callback_data=pair))
-
-        if i % 2 == 0:
-            keyboard.append(row)
-            row = []
-
-    if row:
-        keyboard.append(row)
-
-    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="back")])
-    return InlineKeyboardMarkup(keyboard)
-
-
-def otc_menu():
-    keyboard = []
-    row = []
-
-    for i, pair in enumerate(OTC_PAIRS, 1):
-        clean = pair.replace("-OTC", "")
-        display = clean[:3] + "/" + clean[3:]
 
         row.append(
-            InlineKeyboardButton(display + " (OTC)", callback_data=pair)
+            InlineKeyboardButton(display, callback_data=pair)
         )
 
         if i % 2 == 0:
@@ -75,7 +57,36 @@ def otc_menu():
     if row:
         keyboard.append(row)
 
-    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="back_main")])
+    keyboard.append([
+        InlineKeyboardButton("⬅️ Back", callback_data="back_main")
+    ])
+
+    return InlineKeyboardMarkup(keyboard)
+
+
+# 🔥 NEW: CRYPTO MENU
+def crypto_menu():
+    keyboard = []
+    row = []
+
+    for i, pair in enumerate(CRYPTO_PAIRS, 1):
+        display = pair.replace("USDT", "/USDT")
+
+        row.append(
+            InlineKeyboardButton(display, callback_data=f"crypto_{pair}")
+        )
+
+        if i % 2 == 0:
+            keyboard.append(row)
+            row = []
+
+    if row:
+        keyboard.append(row)
+
+    keyboard.append([
+        InlineKeyboardButton("⬅️ Back", callback_data="back_main")
+    ])
+
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -90,24 +101,29 @@ def timeframe_menu(pair):
 
 # ================= SIGNAL =================
 
+# 🔥 UPDATED: SUPPORT FOREX + CRYPTO
 def get_analysis(symbol, interval):
-    handler = TA_Handler(
-        symbol=symbol,
-        screener="forex",
-        exchange="FX_IDC",
-        interval=interval
-    )
-    return handler.get_analysis()
+    if "USDT" in symbol:
+        handler = TA_Handler(
+            symbol=symbol,
+            screener="crypto",
+            exchange="BINANCE",
+            interval=interval
+        )
+    else:
+        handler = TA_Handler(
+            symbol=symbol,
+            screener="forex",
+            exchange="FX_IDC",
+            interval=interval
+        )
+
+    analysis = handler.get_analysis()
+    return analysis
 
 
 def generate_signal(pair, timeframe):
     try:
-        # 🔥 OTC DETECTION
-        is_otc = False
-        if "-OTC" in pair:
-            is_otc = True
-            pair = pair.replace("-OTC", "")
-
         interval_map = {
             "1m": Interval.INTERVAL_1_MINUTE,
             "5m": Interval.INTERVAL_5_MINUTES,
@@ -119,98 +135,60 @@ def generate_signal(pair, timeframe):
         rsi = analysis.indicators["RSI"]
         ema50 = analysis.indicators["EMA50"]
         price = analysis.indicators["close"]
-        high = analysis.indicators.get("high", price)
-        low = analysis.indicators.get("low", price)
-
-        # 🔥 NEW (candle data for OTC accuracy)
-        open_price = analysis.indicators.get("open", price)
 
         signal = "HOLD"
         warning = ""
         entry_price = None
+        direction = ""
 
-        # 🔥 EMA DISTANCE FILTER
         distance_from_ema = abs(price - ema50) / price
         if distance_from_ema > 0.0028:
             warning = "⚠️ Strong trend or volatile market → HIGH RISK"
 
-        # 🔥 OTC FAKE BREAKOUT FILTER
-        if is_otc:
-            wick_size = abs(high - low)
-            body_size = abs(price - open_price)
-
-            if wick_size > body_size * 3:
-                return "⛔ OTC: Fake spike detected → Skip trade"
-
-        # ================= STRATEGY =================
-
-        if (rsi < (25 if is_otc else 32)) and price >= ema50 * 0.993:
-
-            # 🔥 OTC candle confirmation
-            if is_otc and price < open_price:
-                return "⛔ OTC: Waiting for bullish confirmation candle"
-
+        if rsi < 32 and price >= ema50 * 0.993:
             signal = "BUY"
+            direction = "CALL"
             entry_price = round(max(price, ema50 * 0.997), 5)
 
-        elif (rsi > (75 if is_otc else 68)) and price <= ema50 * 1.007:
-
-            # 🔥 OTC candle confirmation
-            if is_otc and price > open_price:
-                return "⛔ OTC: Waiting for bearish confirmation candle"
-
+        elif rsi > 68 and price <= ema50 * 1.007:
             signal = "SELL"
+            direction = "PUT"
             entry_price = round(min(price, ema50 * 1.003), 5)
 
         else:
-            if is_otc:
-                return "⛔ OTC: Market too choppy → No trade"
             signal = "HOLD"
             warning = "⚠️ Market is not good → Don't Trade"
 
-        # ================= DISPLAY =================
-
         if signal == "BUY":
-            signal_display = "🟢 BUY / CALL"
-            entry_text = f"📍 Enter **CALL** at **{entry_price}**\n   → Or wait for next candle open"
+            signal_display = f"🟢 BUY / CALL"
+            entry_text = f"📍 Enter **CALL** at **{entry_price}**\n→ Or wait next candle"
         elif signal == "SELL":
-            signal_display = "🔴 SELL / PUT"
-            entry_text = f"📍 Enter **PUT** at **{entry_price}**\n   → Or wait for next candle open"
+            signal_display = f"🔴 SELL / PUT"
+            entry_text = f"📍 Enter **PUT** at **{entry_price}**\n→ Or wait next candle"
         else:
             signal_display = "🟡 HOLD"
-            entry_text = "⛔ Do not trade right now"
-
-        mode = "🟣 OTC MODE" if is_otc else "🌐 LIVE FOREX"
+            entry_text = "⛔ Do not trade"
 
         return f"""
-📊 **Sigma AI - Pocket Option Signal**
-{mode}
+📊 **Sigma AI Signal**
 
 💱 Pair: **{pair}**
 ⏱ Timeframe: **{timeframe}**
 
-📈 **Signal**: **{signal_display}**
+📈 Signal: **{signal_display}**
 
 {entry_text}
 
 {warning}
 
-🧠 **Strategy**: Mean Reversion (RSI + EMA50)
-
-📊 **Indicators**:
-• RSI: `{round(rsi, 2)}`
-• EMA50: `{round(ema50, 5)}`
-• Current Price: `{round(price, 5)}`
-
-⚡ **Tip for Pocket Option**:
-• Use **Next Candle** entry
-• Best for 1-5 minute expiration
-• Avoid news!
+📊 RSI: `{round(rsi, 2)}`
+📊 EMA50: `{round(ema50, 5)}`
+📊 Price: `{round(price, 5)}`
 """
 
     except Exception as e:
         print("ERROR:", e)
-        return "❌ Failed to fetch data. Please try again."
+        return "❌ Failed to fetch data."
 
 # ================= HANDLERS =================
 
@@ -228,7 +206,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     await update.message.reply_text(
-        "👋 Welcome! Click below to start:",
+        "👋 Welcome! Click below:",
         reply_markup=reply_markup
     )
 
@@ -241,7 +219,7 @@ async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.message.text == "🚀 Start Bot":
         await update.message.reply_text(
-            "🚀 Welcome to Sigma AI Bot",
+            "🚀 Sigma AI Bot",
             reply_markup=main_menu()
         )
 
@@ -260,11 +238,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "forex":
         await query.edit_message_text("Select Pair:", reply_markup=forex_menu())
 
-    elif data == "otc":
-        await query.edit_message_text("Select OTC Pair:", reply_markup=otc_menu())
+    elif data == "crypto":
+        await query.edit_message_text("Select Crypto:", reply_markup=crypto_menu())
 
-    elif data in PAIRS or data in OTC_PAIRS:
+    elif data in PAIRS:
         await query.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu(data))
+
+    elif data.startswith("crypto_"):
+        pair = data.replace("crypto_", "")
+        await query.edit_message_text(
+            "Select Timeframe:",
+            reply_markup=timeframe_menu(pair)
+        )
 
     elif "_" in data:
         pair, tf = data.split("_")
@@ -273,7 +258,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "back_main":
         await query.edit_message_text(
-            "🚀 Welcome to Sigma AI Bot",
+            "🚀 Sigma AI Bot",
             reply_markup=main_menu()
         )
 
