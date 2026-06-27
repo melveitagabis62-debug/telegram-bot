@@ -120,7 +120,7 @@ def get_analysis(symbol, interval):
     return analysis
 
 
-# 🔥🔥 UPDATED LOGIC HERE (REVERSAL + TREND)
+# 🔥🔥 PRO STRATEGY (UPGRADED ONLY HERE — NOTHING ELSE CHANGED)
 def generate_signal(pair, timeframe):
     try:
         interval_map = {
@@ -134,60 +134,116 @@ def generate_signal(pair, timeframe):
         rsi = analysis.indicators["RSI"]
         ema50 = analysis.indicators["EMA50"]
         price = analysis.indicators["close"]
+        open_price = analysis.indicators["open"]
 
         signal = "HOLD"
         warning = ""
         entry_price = None
         direction = ""
 
+        # ================= EXTRA CALCULATIONS =================
         distance_from_ema = abs(price - ema50) / price
-        if distance_from_ema > 0.0028:
-            warning = "⚠️ Strong trend or volatile market → HIGH RISK"
+        candle_body = abs(price - open_price)
+
+        # 🔥 CRYPTO TUNING
+        if "BTC" in pair:
+            overbought = 75
+            oversold = 25
+            trend_rsi = 55
+        else:
+            overbought = 70
+            oversold = 30
+            trend_rsi = 50
+
+        # ================= NO TRADE ZONE =================
+        if 45 < rsi < 55:
+            return f"""
+📊 **Sigma AI Signal**
+
+💱 Pair: **{pair}**
+⏱ Timeframe: **{timeframe}**
+
+🟡 HOLD
+
+⛔ No-trade zone (RSI sideways)
+"""
+
+        # ================= FAKE BREAKOUT DETECTION =================
+        fake_breakout = False
+
+        if price > ema50 and rsi < trend_rsi:
+            fake_breakout = True
+
+        if price < ema50 and rsi > trend_rsi:
+            fake_breakout = True
+
+        if fake_breakout:
+            return f"""
+📊 **Sigma AI Signal**
+
+💱 Pair: **{pair}**
+⏱ Timeframe: **{timeframe}**
+
+⛔ Fake breakout detected
+❌ Avoid entry
+"""
+
+        # ================= HIGH VOLATILITY =================
+        if distance_from_ema > 0.003:
+            warning = "⚠️ Market too extended → wait pullback"
 
         # ================= STRATEGY =================
 
-        # 🔥 1. REVERSAL (HIGH ACCURACY)
-        if rsi <= 30:
+        if rsi <= oversold:
             signal = "BUY"
             direction = "CALL"
-            entry_price = round(price, 5)
 
-        elif rsi >= 70:
+        elif rsi >= overbought:
             signal = "SELL"
             direction = "PUT"
-            entry_price = round(price, 5)
 
-        # 🔥 2. TREND (MORE SIGNALS)
-        elif price > ema50 and rsi > 50:
+        elif price > ema50 and rsi > trend_rsi:
             signal = "BUY"
             direction = "CALL"
-            entry_price = round(price, 5)
 
-        elif price < ema50 and rsi < 50:
+        elif price < ema50 and rsi < trend_rsi:
             signal = "SELL"
             direction = "PUT"
-            entry_price = round(price, 5)
 
         else:
             signal = "HOLD"
-            warning = "⚠️ Market is not good → Don't Trade"
 
-        # ================= DISPLAY =================
+        # ================= CANDLE CONFIRMATION =================
+        if signal != "HOLD":
+            if candle_body < (price * 0.0005):
+                return f"""
+📊 **Sigma AI Signal**
+
+💱 Pair: **{pair}**
+⏱ Timeframe: **{timeframe}**
+
+⚠️ Weak candle
+⏳ Wait for confirmation candle
+"""
+
+        # ================= FINAL OUTPUT =================
 
         if signal == "BUY":
-            signal_display = f"🟢 BUY / CALL"
-            entry_text = f"📍 Enter **CALL** at **{entry_price}**\n→ Or wait next candle"
+            entry_price = round(price, 5)
+            signal_display = "🟢 BUY / CALL"
+            entry_text = f"📍 Enter CALL at **{entry_price}**\n→ Confirm next candle"
 
         elif signal == "SELL":
-            signal_display = f"🔴 SELL / PUT"
-            entry_text = f"📍 Enter **PUT** at **{entry_price}**\n→ Or wait next candle"
+            entry_price = round(price, 5)
+            signal_display = "🔴 SELL / PUT"
+            entry_text = f"📍 Enter PUT at **{entry_price}**\n→ Confirm next candle"
 
         else:
             signal_display = "🟡 HOLD"
             entry_text = "⛔ Do not trade"
 
         return f"""
-📊 **Sigma AI Signal**
+📊 **Sigma AI Signal (PRO)**
 
 💱 Pair: **{pair}**
 ⏱ Timeframe: **{timeframe}**
@@ -202,9 +258,11 @@ def generate_signal(pair, timeframe):
 📊 EMA50: `{round(ema50, 5)}`
 📊 Price: `{round(price, 5)}`
 """
+
     except Exception as e:
         print("ERROR:", e)
         return "❌ Failed to fetch data."
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -230,7 +288,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
 
-    # MAIN MENU
     if data == "forex":
         await query.edit_message_text("📊 Choose Forex Pair:", reply_markup=forex_menu())
 
@@ -243,7 +300,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "back_forex":
         await query.edit_message_text("📊 Choose Forex Pair:", reply_markup=forex_menu())
 
-    # PAIR SELECTED → SHOW TIMEFRAME
     elif data in PAIRS:
         await query.edit_message_text(
             f"⏱ Select timeframe for {data}",
@@ -257,13 +313,11 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=timeframe_menu(pair)
         )
 
-    # FINAL SIGNAL
     elif "_" in data:
         pair, timeframe = data.split("_")
-
         result = generate_signal(pair, timeframe)
-
         await query.edit_message_text(result, parse_mode="Markdown")
+
 
 app = ApplicationBuilder().token(TOKEN).build()
 
@@ -271,5 +325,4 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(handle_buttons))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-app.run_polling(
-)
+app.run_polling()
