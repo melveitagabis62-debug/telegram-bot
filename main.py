@@ -144,34 +144,74 @@ def generate_signal(pair, timeframe):
         if distance_from_ema > 0.0028:
             warning = "⚠️ Strong trend or volatile market → HIGH RISK"
 
-        # ================= STRATEGY =================
 
-        # 🔥 1. REVERSAL (HIGH ACCURACY)
-        if rsi <= 30:
-            signal = "BUY"
-            direction = "CALL"
-            entry_price = round(price, 5)
+        # ================= PRO STRATEGY =================
 
-        elif rsi >= 70:
-            signal = "SELL"
-            direction = "PUT"
-            entry_price = round(price, 5)
+        is_crypto = "USDT" in pair
 
-        # 🔥 2. TREND (MORE SIGNALS)
-        elif price > ema50 and rsi > 50:
-            signal = "BUY"
-            direction = "CALL"
-            entry_price = round(price, 5)
+        # 🔥 NO-TRADE ZONE (sideways killer)
+        if 45 <= rsi <= 55:
+        return f"""
+📊 **Sigma AI Signal**
 
-        elif price < ema50 and rsi < 50:
-            signal = "SELL"
-            direction = "PUT"
-            entry_price = round(price, 5)
+💱 Pair: **{pair}**
+⏱ Timeframe: **{timeframe}**
 
-        else:
-            signal = "HOLD"
-            warning = "⚠️ Market is not good → Don't Trade"
+🟡 HOLD
 
+⛔ No-trade zone (sideways market)
+
+📊 RSI: `{round(rsi, 2)}`
+"""
+
+# 🔥 FAKE BREAKOUT FILTER
+distance_from_ema = abs(price - ema50) / price
+
+        if distance_from_ema > (0.004 if is_crypto else 0.003):
+        return f"""
+📊 **Sigma AI Signal**
+
+💱 Pair: **{pair}**
+⏱ Timeframe: **{timeframe}**
+
+⚠️ FAKE BREAKOUT RISK
+
+⛔ Price too far from EMA → likely reversal trap
+
+📊 RSI: `{round(rsi, 2)}`
+"""
+
+# 🔥 RSI MOMENTUM (candle confirmation)
+rsi_strength = abs(rsi - 50)
+
+# ================= SIGNAL LOGIC =================
+
+        # 🔥 REVERSAL (VERY STRONG)
+        if rsi <= (28 if is_crypto else 30):
+        signal = "BUY"
+        direction = "CALL"
+        entry_price = round(price, 5)
+
+        elif rsi >= (72 if is_crypto else 70):
+        signal = "SELL"
+        direction = "PUT"
+        entry_price = round(price, 5)
+
+        # 🔥 TREND + MOMENTUM CONFIRMATION
+        elif price > ema50 and rsi > (55 if is_crypto else 52) and rsi_strength > 5:
+        signal = "BUY"
+        direction = "CALL"
+        entry_price = round(price, 5)
+
+        elif price < ema50 and rsi < (45 if is_crypto else 48) and rsi_strength > 5:
+        signal = "SELL"
+        direction = "PUT"
+        entry_price = round(price, 5)
+
+        # 🔥 OTHERWISE
+    else:
+        signal = "HOLD"
+        warning = "⚠️ Weak structure → Skip trade"
         # ================= DISPLAY =================
 
         if signal == "BUY":
