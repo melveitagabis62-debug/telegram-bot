@@ -7,9 +7,8 @@ import logging
 import os
 
 TOKEN = os.getenv("TOKEN")
-ALLOWED_USERS = [6351041498]  # replace with your Telegram ID
+ALLOWED_USERS = [6351041498]
 
-# 🔥 ADD THIS RIGHT HERE
 PAIRS = [
     "EURUSD", "GBPUSD", "USDJPY", "AUDUSD",
     "USDCAD", "USDCHF", "NZDUSD",
@@ -20,7 +19,7 @@ PAIRS = [
     "CADCHF"
 ]
 
-# 🔥 NEW: OTC PAIRS
+# 🔥 OTC PAIRS
 OTC_PAIRS = [
     "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC",
     "AUDUSD-OTC", "USDCAD-OTC", "USDCHF-OTC",
@@ -32,7 +31,7 @@ OTC_PAIRS = [
 def main_menu():
     keyboard = [
         [InlineKeyboardButton("📊 Forex", callback_data="forex")],
-        [InlineKeyboardButton("🟣 OTC Market", callback_data="otc")],  # 🔥 NEW
+        [InlineKeyboardButton("🟣 OTC Market", callback_data="otc")],
         [InlineKeyboardButton("💰 Crypto", callback_data="crypto")]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -43,11 +42,8 @@ def forex_menu():
     row = []
 
     for i, pair in enumerate(PAIRS, 1):
-        display = pair[:3] + "/" + pair[3:]  # EURUSD → EUR/USD
-
-        row.append(
-            InlineKeyboardButton(display, callback_data=pair)
-        )
+        display = pair[:3] + "/" + pair[3:]
+        row.append(InlineKeyboardButton(display, callback_data=pair))
 
         if i % 2 == 0:
             keyboard.append(row)
@@ -56,13 +52,10 @@ def forex_menu():
     if row:
         keyboard.append(row)
 
-    keyboard.append([
-        InlineKeyboardButton("⬅️ Back", callback_data="back")
-    ])
-
+    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="back")])
     return InlineKeyboardMarkup(keyboard)
 
-# 🔥 NEW OTC MENU
+
 def otc_menu():
     keyboard = []
     row = []
@@ -82,10 +75,7 @@ def otc_menu():
     if row:
         keyboard.append(row)
 
-    keyboard.append([
-        InlineKeyboardButton("⬅️ Back", callback_data="back_main")
-    ])
-
+    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="back_main")])
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -94,7 +84,6 @@ def timeframe_menu(pair):
         [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"),
          InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
         [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")],
-        
         [InlineKeyboardButton("⬅️ Back", callback_data="back_forex")],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -108,14 +97,12 @@ def get_analysis(symbol, interval):
         exchange="FX_IDC",
         interval=interval
     )
-
-    analysis = handler.get_analysis()
-    return analysis
+    return handler.get_analysis()
 
 
 def generate_signal(pair, timeframe):
     try:
-        # 🔥 NEW: OTC DETECTION
+        # 🔥 OTC DETECTION
         is_otc = False
         if "-OTC" in pair:
             is_otc = True
@@ -135,45 +122,64 @@ def generate_signal(pair, timeframe):
         high = analysis.indicators.get("high", price)
         low = analysis.indicators.get("low", price)
 
+        # 🔥 NEW (candle data for OTC accuracy)
+        open_price = analysis.indicators.get("open", price)
+
         signal = "HOLD"
         warning = ""
         entry_price = None
-        direction = ""
 
-        # Strong trend filter
+        # 🔥 EMA DISTANCE FILTER
         distance_from_ema = abs(price - ema50) / price
-        if distance_from_ema > 0.0028:  
+        if distance_from_ema > 0.0028:
             warning = "⚠️ Strong trend or volatile market → HIGH RISK"
 
-        # STRATEGY
-        if rsi < 32 and price >= ema50 * 0.993:
+        # 🔥 OTC FAKE BREAKOUT FILTER
+        if is_otc:
+            wick_size = abs(high - low)
+            body_size = abs(price - open_price)
+
+            if wick_size > body_size * 3:
+                return "⛔ OTC: Fake spike detected → Skip trade"
+
+        # ================= STRATEGY =================
+
+        if (rsi < (25 if is_otc else 32)) and price >= ema50 * 0.993:
+
+            # 🔥 OTC candle confirmation
+            if is_otc and price < open_price:
+                return "⛔ OTC: Waiting for bullish confirmation candle"
+
             signal = "BUY"
-            direction = "CALL"
             entry_price = round(max(price, ema50 * 0.997), 5)
 
-        elif rsi > 68 and price <= ema50 * 1.007:
+        elif (rsi > (75 if is_otc else 68)) and price <= ema50 * 1.007:
+
+            # 🔥 OTC candle confirmation
+            if is_otc and price > open_price:
+                return "⛔ OTC: Waiting for bearish confirmation candle"
+
             signal = "SELL"
-            direction = "PUT"
             entry_price = round(min(price, ema50 * 1.003), 5)
 
         else:
+            if is_otc:
+                return "⛔ OTC: Market too choppy → No trade"
             signal = "HOLD"
             warning = "⚠️ Market is not good → Don't Trade"
 
-        # DISPLAY
+        # ================= DISPLAY =================
+
         if signal == "BUY":
-            signal_display = f"🟢 BUY / CALL"
-            entry_text = f"📍 Enter **CALL** at **{entry_price}**\n" \
-                        f"   → Or wait for next candle open"
+            signal_display = "🟢 BUY / CALL"
+            entry_text = f"📍 Enter **CALL** at **{entry_price}**\n   → Or wait for next candle open"
         elif signal == "SELL":
-            signal_display = f"🔴 SELL / PUT"
-            entry_text = f"📍 Enter **PUT** at **{entry_price}**\n" \
-                        f"   → Or wait for next candle open"
+            signal_display = "🔴 SELL / PUT"
+            entry_text = f"📍 Enter **PUT** at **{entry_price}**\n   → Or wait for next candle open"
         else:
             signal_display = "🟡 HOLD"
             entry_text = "⛔ Do not trade right now"
 
-        # 🔥 NEW MODE LABEL
         mode = "🟣 OTC MODE" if is_otc else "🌐 LIVE FOREX"
 
         return f"""
@@ -197,9 +203,9 @@ def generate_signal(pair, timeframe):
 • Current Price: `{round(price, 5)}`
 
 ⚡ **Tip for Pocket Option**:
-• Use **Next Candle** entry to avoid repaints
-• Best for 1-5 minute expirations
-• Avoid news times!
+• Use **Next Candle** entry
+• Best for 1-5 minute expiration
+• Avoid news!
 """
 
     except Exception as e:
@@ -226,6 +232,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
+
 async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
@@ -248,13 +255,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await query.answer()
-
     data = query.data
 
     if data == "forex":
         await query.edit_message_text("Select Pair:", reply_markup=forex_menu())
 
-    # 🔥 NEW OTC HANDLER
     elif data == "otc":
         await query.edit_message_text("Select OTC Pair:", reply_markup=otc_menu())
 
