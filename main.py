@@ -201,7 +201,67 @@ def generate_signal(pair, timeframe):
 📊 EMA50: `{round(ema50, 5)}`
 📊 Price: `{round(price, 5)}`
 """
-
     except Exception as e:
         print("ERROR:", e)
         return "❌ Failed to fetch data."
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    if user_id not in ALLOWED_USERS:
+        await update.message.reply_text("❌ Not authorized")
+        return
+
+    await update.message.reply_text(
+        "🚀 Sigma Bot Started\n\nChoose market:",
+        reply_markup=main_menu()
+    )
+
+async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+
+    # MAIN MENU
+    if data == "forex":
+        await query.edit_message_text("📊 Choose Forex Pair:", reply_markup=forex_menu())
+
+    elif data == "crypto":
+        await query.edit_message_text("💰 Choose Crypto Pair:", reply_markup=crypto_menu())
+
+    elif data == "back_main":
+        await query.edit_message_text("🏠 Main Menu:", reply_markup=main_menu())
+
+    elif data == "back_forex":
+        await query.edit_message_text("📊 Choose Forex Pair:", reply_markup=forex_menu())
+
+    # PAIR SELECTED → SHOW TIMEFRAME
+    elif data in PAIRS:
+        await query.edit_message_text(
+            f"⏱ Select timeframe for {data}",
+            reply_markup=timeframe_menu(data)
+        )
+
+    elif data.startswith("crypto_"):
+        pair = data.replace("crypto_", "")
+        await query.edit_message_text(
+            f"⏱ Select timeframe for {pair}",
+            reply_markup=timeframe_menu(pair)
+        )
+
+    # FINAL SIGNAL
+    elif "_" in data:
+        pair, timeframe = data.split("_")
+
+        result = generate_signal(pair, timeframe)
+
+        await query.edit_message_text(result, parse_mode="Markdown")
+
+app = ApplicationBuilder().token(TOKEN).build()
+
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(handle_buttons))
+
+app.run_polling(
+)
