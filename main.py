@@ -152,7 +152,7 @@ def generate_signal(pair, timeframe):
         # 🔥 NO-TRADE ZONE (sideways killer)
         if 45 <= rsi <= 55:
         
-    return f"""
+            return f"""
 📊 **Sigma AI Signal**
 
 💱 Pair: **{pair}**
