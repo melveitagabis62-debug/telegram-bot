@@ -1,5 +1,6 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import MessageHandler, filters
 
 from tradingview_ta import TA_Handler, Interval
 import logging
@@ -216,6 +217,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🚀 Sigma Bot Started\n\nChoose market:",
         reply_markup=main_menu()
     )
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.lower()
+
+    if text in ["start bot", "🚀 start bot"]:
+        await start(update, context)
 
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
