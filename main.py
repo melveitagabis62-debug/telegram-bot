@@ -87,8 +87,8 @@ async def session_notifier(app):
             for user_id in ALLOWED_USERS:
                 try:
                     await app.bot.send_message(chat_id=user_id, text=message)
-                except:
-                    pass
+                except Exception as e:
+                    print(e)
 
         await asyncio.sleep(60)
 
