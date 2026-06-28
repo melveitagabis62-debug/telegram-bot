@@ -54,6 +54,31 @@ def get_entry_timing(timeframe):
     else:
         return f"🔥 ENTER NOW ({remaining}s to new candle)"
 
+# === SESSION DETECTION ===
+def get_trading_session():
+    now = datetime.datetime.utcnow()
+    hour = now.hour
+
+    if 7 <= hour < 13:
+        return "🇬🇧 London Session OPEN"
+    elif 13 <= hour < 17:
+        return "🔥 London-New York OVERLAP (BEST TIME)"
+    elif 17 <= hour < 22:
+        return "🇺🇸 New York Session OPEN"
+    else:
+        return None
+
+# === AUTO SESSION NOTIFIER ===
+async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
+    session = get_trading_session()
+
+    if session:
+        for user_id in ALLOWED_USERS:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"{session}\n\n💡 Market is active — look for sniper entries!"
+            )
+
 # === RESULT BUTTONS ===
 def result_buttons():
     return InlineKeyboardMarkup([
@@ -288,6 +313,9 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(result, parse_mode="Markdown", reply_markup=result_buttons())
 
 app = ApplicationBuilder().token(TOKEN).build()
+
+# ✅ RUN SESSION NOTIFIER
+app.job_queue.run_repeating(session_notifier, interval=300, first=10)
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(handle_buttons))
