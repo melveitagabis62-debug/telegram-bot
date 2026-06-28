@@ -10,7 +10,7 @@ import datetime
 TOKEN = os.getenv("TOKEN")
 ALLOWED_USERS = [6351041498]
 
-# === NEW: TRACKING SYSTEM ===
+# === TRACKING SYSTEM ===
 WIN = 0
 LOSS = 0
 MARTINGALE_STEP = 0
@@ -29,7 +29,7 @@ def increase_martingale():
     global MARTINGALE_STEP
     MARTINGALE_STEP += 1
 
-# === NEW: RESULT BUTTONS ===
+# === RESULT BUTTONS ===
 def result_buttons():
     return InlineKeyboardMarkup([
         [
@@ -39,29 +39,20 @@ def result_buttons():
     ])
 
 PAIRS = [
-    "EURUSD", "GBPUSD", "USDJPY", "AUDUSD",
-    "USDCAD", "USDCHF", "NZDUSD",
-    "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY",
-    "EURGBP", "EURCHF", "EURAUD", "EURCAD",
-    "GBPAUD", "GBPCAD", "GBPCHF",
-    "AUDCAD", "AUDCHF",
-    "CADCHF"
+    "EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD",
+    "EURJPY","GBPJPY","AUDJPY","CADJPY","CHFJPY",
+    "EURGBP","EURCHF","EURAUD","EURCAD",
+    "GBPAUD","GBPCAD","GBPCHF",
+    "AUDCAD","AUDCHF","CADCHF"
 ]
 
-CRYPTO_PAIRS = [
-    "BTCUSDT",
-    "ETHUSDT",
-    "BNBUSDT",
-    "SOLUSDT",
-    "XRPUSDT"
-]
+CRYPTO_PAIRS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]
 
 def main_menu():
-    keyboard = [
+    return InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 Forex", callback_data="forex")],
         [InlineKeyboardButton("💰 Crypto", callback_data="crypto")]
-    ]
-    return InlineKeyboardMarkup(keyboard)
+    ])
 
 def forex_menu():
     keyboard, row = [], []
@@ -105,6 +96,12 @@ def get_analysis(symbol, interval):
 def is_news_time():
     return False
 
+# 🔥 NEW: FAKE BREAKOUT FILTER
+def is_fake_breakout(open_price, close, high, low):
+    body = abs(close - open_price)
+    wick = high - low
+    return wick > body * 2
+
 def generate_signal(pair, timeframe):
     try:
         interval_map = {
@@ -129,6 +126,10 @@ def generate_signal(pair, timeframe):
         high = analysis.indicators["high"]
         low = analysis.indicators["low"]
 
+        # 🔥 Fake breakout protection
+        if is_fake_breakout(open_price, price, high, low):
+            return "⛔ Fake breakout detected"
+
         def get_trend(tf):
             a = get_analysis(pair, interval_map[tf])
             return "UP" if a.indicators["close"] > a.indicators["EMA50"] else "DOWN"
@@ -150,6 +151,10 @@ def generate_signal(pair, timeframe):
 
         if 45 < rsi < 55:
             return "⛔ Market ranging"
+
+        # 🔥 EMA PULLBACK (STRICT)
+        if abs(price - ema50) / price > 0.002:
+            return "⏳ Waiting pullback to EMA50"
 
         near_support = abs(price - low) / price < 0.0015
         near_resistance = abs(price - high) / price < 0.0015
@@ -173,9 +178,6 @@ def generate_signal(pair, timeframe):
         if signal == "SELL" and not bearish:
             return "⏳ Waiting bearish candle"
 
-        if abs(price - ema50) / price > 0.002:
-            return "⏳ Wait for pullback to EMA50"
-
         expiration = {
             "1m": "2-3 minutes",
             "5m": "5-10 minutes",
@@ -194,20 +196,19 @@ def generate_signal(pair, timeframe):
 
         result = "🟡 HOLD"
         if signal == "BUY":
-            result = f"🟢 BUY @ {round(price,5)}"
+            result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🟢 BUY @ {round(price,5)}"
         elif signal == "SELL":
-            result = f"🔴 SELL @ {round(price,5)}"
+            result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🔴 SELL @ {round(price,5)}"
 
-        # === ADD TRADE INFO ===
         amount = get_trade_amount()
 
         return f"""
-📊 **Sigma AI PRO MAX (REAL MODE)**
+📊 Sigma AI PRO MAX (SNIPER MODE)
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
 
-📈 {result}
+{result}
 🔥 Confidence: {confidence}/6
 
 💰 Amount: {amount}
@@ -233,7 +234,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text.lower() in ["start bot", "🚀 start bot"]:
         await start(update, context)
 
-# === HANDLE BUTTONS (UPDATED) ===
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global WIN, LOSS
 
@@ -241,7 +241,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
-    # RESULT BUTTONS
     if data == "result_win":
         WIN += 1
         reset_martingale()
@@ -274,8 +273,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif "_" in data:
         pair, tf = data.split("_")
         result = generate_signal(pair, tf)
-
-        # 🔥 SEND WITH BUTTONS
         await query.edit_message_text(result, parse_mode="Markdown", reply_markup=result_buttons())
 
 app = ApplicationBuilder().token(TOKEN).build()
