@@ -29,6 +29,31 @@ def increase_martingale():
     global MARTINGALE_STEP
     MARTINGALE_STEP += 1
 
+# === ENTRY TIMING SYSTEM ===
+def get_entry_timing(timeframe):
+    now = datetime.datetime.utcnow()
+
+    if timeframe == "1m":
+        total_seconds = 60
+        seconds_passed = now.second
+
+    elif timeframe == "5m":
+        total_seconds = 300
+        seconds_passed = (now.minute % 5) * 60 + now.second
+
+    elif timeframe == "15m":
+        total_seconds = 900
+        seconds_passed = (now.minute % 15) * 60 + now.second
+
+    remaining = total_seconds - seconds_passed
+
+    if remaining > total_seconds * 0.6:
+        return f"⏳ WAIT ({remaining}s left in candle)"
+    elif remaining > total_seconds * 0.2:
+        return f"⚠️ PREPARE ({remaining}s)"
+    else:
+        return f"🔥 ENTER NOW ({remaining}s to new candle)"
+
 # === RESULT BUTTONS ===
 def result_buttons():
     return InlineKeyboardMarkup([
@@ -139,39 +164,30 @@ def generate_signal(pair, timeframe):
         high = analysis.indicators["high"]
         low = analysis.indicators["low"]
 
-        # simulate previous candle (limitation workaround)
         prev_open = open_price
         prev_close = price
 
-        # === NO TRADE ZONE ===
         if is_no_trade_zone(rsi, price, ema50, high, low):
             return "⛔ No Trade Zone (choppy market)"
 
-        # === TREND ===
         trend = "UP" if price > ema50 else "DOWN"
 
-        # === FAKE BREAKOUT ===
         if is_fake_breakout(open_price, price, high, low):
             return "⛔ Fake breakout"
 
-        # === STRUCTURE (IMPROVED S/R) ===
         support = low
         resistance = high
 
         near_support = abs(price - support) / price < 0.0015
         near_resistance = abs(price - resistance) / price < 0.0015
 
-        # === ENTRY LOGIC (ELITE) ===
         signal = None
 
         engulf = detect_engulfing(open_price, price, prev_open, prev_close)
         wick_reject = rejection_wick(open_price, price, high, low)
 
-        # BUY CONDITIONS
         if trend == "UP" and near_support and (engulf or wick_reject):
             signal = "BUY"
-
-        # SELL CONDITIONS
         elif trend == "DOWN" and near_resistance and (engulf or wick_reject):
             signal = "SELL"
 
@@ -188,13 +204,13 @@ def generate_signal(pair, timeframe):
         if engulf: confidence += 1
         if wick_reject: confidence += 1
 
-        result = ""
         if signal == "BUY":
             result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🟢 BUY @ {round(price,5)}"
-        elif signal == "SELL":
+        else:
             result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🔴 SELL @ {round(price,5)}"
 
         amount = get_trade_amount()
+        timing = get_entry_timing(timeframe)
 
         return f"""
 📊 Sigma AI ELITE SNIPER
@@ -203,6 +219,8 @@ def generate_signal(pair, timeframe):
 ⏱ TF: {timeframe}
 
 {result}
+{timing}
+
 🔥 Confidence: {confidence}/6
 
 💰 Amount: {amount}
