@@ -29,30 +29,40 @@ def increase_martingale():
     global MARTINGALE_STEP
     MARTINGALE_STEP += 1
 
-# === ENTRY TIMING SYSTEM ===
-def get_entry_timing(timeframe):
+# === 🔥 REAL TRADINGVIEW CANDLE TIMER ===
+def get_candle_countdown(timeframe):
     now = datetime.datetime.utcnow()
 
     if timeframe == "1m":
-        total_seconds = 60
-        seconds_passed = now.second
+        total = 60
+        passed = now.second
 
     elif timeframe == "5m":
-        total_seconds = 300
-        seconds_passed = (now.minute % 5) * 60 + now.second
+        total = 300
+        passed = (now.minute % 5) * 60 + now.second
 
     elif timeframe == "15m":
-        total_seconds = 900
-        seconds_passed = (now.minute % 15) * 60 + now.second
+        total = 900
+        passed = (now.minute % 15) * 60 + now.second
 
-    remaining = total_seconds - seconds_passed
+    remaining = total - passed
+    minutes = remaining // 60
+    seconds = remaining % 60
 
-    if remaining > total_seconds * 0.6:
-        return f"⏳ WAIT ({remaining}s left in candle)"
-    elif remaining > total_seconds * 0.2:
-        return f"⚠️ PREPARE ({remaining}s)"
+    return remaining, f"{minutes:02d}:{seconds:02d}"
+
+# === ENTRY TIMING (UPGRADED) ===
+def get_entry_timing(timeframe):
+    remaining, formatted = get_candle_countdown(timeframe)
+
+    if remaining > 0.6 * (60 if timeframe=="1m" else 300 if timeframe=="5m" else 900):
+        status = "⏳ WAIT"
+    elif remaining > 0.2 * (60 if timeframe=="1m" else 300 if timeframe=="5m" else 900):
+        status = "⚠️ PREPARE"
     else:
-        return f"🔥 ENTER NOW ({remaining}s to new candle)"
+        status = "🔥 ENTER NOW"
+
+    return f"{status} ({formatted})"
 
 # === SESSION DETECTION ===
 def get_trading_session():
@@ -143,10 +153,7 @@ def get_analysis(symbol, interval):
     )
     return handler.get_analysis()
 
-def is_news_time():
-    return False
-
-# === ADVANCED STRUCTURE ===
+# === ADVANCED LOGIC (UNCHANGED) ===
 def is_fake_breakout(open_price, close, high, low):
     body = abs(close - open_price)
     wick = high - low
@@ -230,9 +237,9 @@ def generate_signal(pair, timeframe):
         if wick_reject: confidence += 1
 
         if signal == "BUY":
-            result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🟢 BUY @ {round(price,5)}"
+            result = f"🟢 BUY @ {round(price,5)}"
         else:
-            result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🔴 SELL @ {round(price,5)}"
+            result = f"🔴 SELL @ {round(price,5)}"
 
         amount = get_trade_amount()
         timing = get_entry_timing(timeframe)
@@ -243,8 +250,10 @@ def generate_signal(pair, timeframe):
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
 
+🔥 ENTER NOW (SNIPER ENTRY)
 {result}
-{timing}
+
+⏱ Candle: {timing}
 
 🔥 Confidence: {confidence}/6
 
@@ -261,15 +270,12 @@ def generate_signal(pair, timeframe):
         print(e)
         return "❌ Error"
 
+# === TELEGRAM ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
         return
     await update.message.reply_text("🚀 Bot Started", reply_markup=main_menu())
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text.lower() in ["start bot", "🚀 start bot"]:
-        await start(update, context)
 
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global WIN, LOSS
@@ -314,11 +320,10 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 app = ApplicationBuilder().token(TOKEN).build()
 
-# ✅ RUN SESSION NOTIFIER
 app.job_queue.run_repeating(session_notifier, interval=300, first=10)
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(handle_buttons))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u,c: None))
 
 app.run_polling()
