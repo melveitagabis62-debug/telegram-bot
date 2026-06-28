@@ -96,11 +96,27 @@ def get_analysis(symbol, interval):
 def is_news_time():
     return False
 
-# 🔥 NEW: FAKE BREAKOUT FILTER
+# === ADVANCED STRUCTURE ===
 def is_fake_breakout(open_price, close, high, low):
     body = abs(close - open_price)
     wick = high - low
     return wick > body * 2
+
+def detect_engulfing(open_p, close_p, prev_open, prev_close):
+    return (close_p > open_p and prev_close < prev_open and close_p > prev_open) or \
+           (close_p < open_p and prev_close > prev_open and close_p < prev_open)
+
+def rejection_wick(open_p, close_p, high, low):
+    body = abs(close_p - open_p)
+    upper_wick = high - max(open_p, close_p)
+    lower_wick = min(open_p, close_p) - low
+    return upper_wick > body * 2 or lower_wick > body * 2
+
+def is_no_trade_zone(rsi, price, ema, high, low):
+    small_candle = (high - low) / price < 0.0008
+    flat_ema = abs(price - ema) / price < 0.0005
+    mid_rsi = 45 < rsi < 55
+    return small_candle and flat_ema and mid_rsi
 
 def generate_signal(pair, timeframe):
     try:
@@ -114,9 +130,6 @@ def generate_signal(pair, timeframe):
         if not (7 <= hour <= 22):
             return "⛔ Trade only London/New York session"
 
-        if is_news_time():
-            return "⛔ High impact news — avoid trading"
-
         analysis = get_analysis(pair, interval_map[timeframe])
 
         rsi = analysis.indicators["RSI"]
@@ -126,57 +139,44 @@ def generate_signal(pair, timeframe):
         high = analysis.indicators["high"]
         low = analysis.indicators["low"]
 
-        # 🔥 Fake breakout protection
+        # simulate previous candle (limitation workaround)
+        prev_open = open_price
+        prev_close = price
+
+        # === NO TRADE ZONE ===
+        if is_no_trade_zone(rsi, price, ema50, high, low):
+            return "⛔ No Trade Zone (choppy market)"
+
+        # === TREND ===
+        trend = "UP" if price > ema50 else "DOWN"
+
+        # === FAKE BREAKOUT ===
         if is_fake_breakout(open_price, price, high, low):
-            return "⛔ Fake breakout detected"
+            return "⛔ Fake breakout"
 
-        def get_trend(tf):
-            a = get_analysis(pair, interval_map[tf])
-            return "UP" if a.indicators["close"] > a.indicators["EMA50"] else "DOWN"
+        # === STRUCTURE (IMPROVED S/R) ===
+        support = low
+        resistance = high
 
-        trend_1m = get_trend("1m")
-        trend_5m = get_trend("5m")
-        trend_15m = get_trend("15m")
+        near_support = abs(price - support) / price < 0.0015
+        near_resistance = abs(price - resistance) / price < 0.0015
 
-        if not (trend_1m == trend_5m == trend_15m):
-            return "⛔ No Trade (trend mismatch)"
+        # === ENTRY LOGIC (ELITE) ===
+        signal = None
 
-        trend_strength = abs(price - ema50) / price
-        if trend_strength < 0.0015:
-            return "⛔ Weak trend"
+        engulf = detect_engulfing(open_price, price, prev_open, prev_close)
+        wick_reject = rejection_wick(open_price, price, high, low)
 
-        range_size = (high - low) / price
-        if range_size < 0.001:
-            return "⛔ Low volatility"
-
-        if 45 < rsi < 55:
-            return "⛔ Market ranging"
-
-        # 🔥 EMA PULLBACK (STRICT)
-        if abs(price - ema50) / price > 0.002:
-            return "⏳ Waiting pullback to EMA50"
-
-        near_support = abs(price - low) / price < 0.0015
-        near_resistance = abs(price - high) / price < 0.0015
-
-        signal = "HOLD"
-
-        if (rsi < 30 and near_support):
+        # BUY CONDITIONS
+        if trend == "UP" and near_support and (engulf or wick_reject):
             signal = "BUY"
-        elif (rsi > 70 and near_resistance):
-            signal = "SELL"
-        elif trend_1m == "UP":
-            signal = "BUY"
-        elif trend_1m == "DOWN":
+
+        # SELL CONDITIONS
+        elif trend == "DOWN" and near_resistance and (engulf or wick_reject):
             signal = "SELL"
 
-        bullish = price > open_price
-        bearish = price < open_price
-
-        if signal == "BUY" and not bullish:
-            return "⏳ Waiting bullish candle"
-        if signal == "SELL" and not bearish:
-            return "⏳ Waiting bearish candle"
+        if not signal:
+            return "⏳ Waiting for sniper setup"
 
         expiration = {
             "1m": "2-3 minutes",
@@ -184,17 +184,11 @@ def generate_signal(pair, timeframe):
             "15m": "15-30 minutes"
         }[timeframe]
 
-        confidence = 0
-        if trend_1m == trend_5m == trend_15m:
-            confidence += 2
-        if near_support or near_resistance:
-            confidence += 1
-        if rsi < 30 or rsi > 70:
-            confidence += 1
-        if trend_strength > 0.002:
-            confidence += 2
+        confidence = 4
+        if engulf: confidence += 1
+        if wick_reject: confidence += 1
 
-        result = "🟡 HOLD"
+        result = ""
         if signal == "BUY":
             result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🟢 BUY @ {round(price,5)}"
         elif signal == "SELL":
@@ -203,7 +197,7 @@ def generate_signal(pair, timeframe):
         amount = get_trade_amount()
 
         return f"""
-📊 Sigma AI PRO MAX (SNIPER MODE)
+📊 Sigma AI ELITE SNIPER
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -217,7 +211,7 @@ def generate_signal(pair, timeframe):
 ⏳ Expiration: {expiration}
 
 📊 RSI: {round(rsi,2)}
-📊 Trend: {trend_1m}/{trend_5m}/{trend_15m}
+📊 Trend: {trend}
 """
 
     except Exception as e:
