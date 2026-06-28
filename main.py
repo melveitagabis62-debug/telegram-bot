@@ -6,6 +6,7 @@ from tradingview_ta import TA_Handler, Interval
 import logging
 import os
 import datetime
+import asyncio
 
 TOKEN = os.getenv("TOKEN")
 ALLOWED_USERS = [6351041498]
@@ -53,6 +54,43 @@ def get_entry_timing(timeframe):
         return f"⚠️ PREPARE ({remaining}s)"
     else:
         return f"🔥 ENTER NOW ({remaining}s to new candle)"
+
+# === SESSION SYSTEM ===
+def get_trading_session():
+    now = datetime.datetime.utcnow()
+    hour = now.hour
+
+    london_open = 7
+    london_close = 16
+    newyork_open = 13
+    newyork_close = 22
+
+    if london_open <= hour < london_close and not (newyork_open <= hour < newyork_close):
+        return "🇬🇧 London Session"
+    elif newyork_open <= hour < newyork_close and not (london_open <= hour < london_close):
+        return "🇺🇸 New York Session"
+    elif london_open <= hour < london_close and newyork_open <= hour < newyork_close:
+        return "🔥 London–New York Overlap (BEST TIME)"
+    else:
+        return "🌙 Off Session (Avoid Trading)"
+
+async def session_notifier(app):
+    last_session = None
+
+    while True:
+        session = get_trading_session()
+
+        if session != last_session:
+            last_session = session
+            message = f"🚨 SESSION UPDATE\n\n{session}"
+
+            for user_id in ALLOWED_USERS:
+                try:
+                    await app.bot.send_message(chat_id=user_id, text=message)
+                except:
+                    pass
+
+        await asyncio.sleep(60)
 
 # === RESULT BUTTONS ===
 def result_buttons():
@@ -118,10 +156,7 @@ def get_analysis(symbol, interval):
     )
     return handler.get_analysis()
 
-def is_news_time():
-    return False
-
-# === ADVANCED STRUCTURE ===
+# === STRUCTURE LOGIC ===
 def is_fake_breakout(open_price, close, high, low):
     body = abs(close - open_price)
     wick = high - low
@@ -143,6 +178,7 @@ def is_no_trade_zone(rsi, price, ema, high, low):
     mid_rsi = 45 < rsi < 55
     return small_candle and flat_ema and mid_rsi
 
+# === SIGNAL ENGINE ===
 def generate_signal(pair, timeframe):
     try:
         interval_map = {
@@ -151,9 +187,10 @@ def generate_signal(pair, timeframe):
             "15m": Interval.INTERVAL_15_MINUTES
         }
 
-        hour = datetime.datetime.utcnow().hour
-        if not (7 <= hour <= 22):
-            return "⛔ Trade only London/New York session"
+        session = get_trading_session()
+
+        if "Off Session" in session:
+            return f"⛔ {session}"
 
         analysis = get_analysis(pair, interval_map[timeframe])
 
@@ -168,7 +205,7 @@ def generate_signal(pair, timeframe):
         prev_close = price
 
         if is_no_trade_zone(rsi, price, ema50, high, low):
-            return "⛔ No Trade Zone (choppy market)"
+            return "⛔ No Trade Zone"
 
         trend = "UP" if price > ema50 else "DOWN"
 
@@ -181,10 +218,10 @@ def generate_signal(pair, timeframe):
         near_support = abs(price - support) / price < 0.0015
         near_resistance = abs(price - resistance) / price < 0.0015
 
-        signal = None
-
         engulf = detect_engulfing(open_price, price, prev_open, prev_close)
         wick_reject = rejection_wick(open_price, price, high, low)
+
+        signal = None
 
         if trend == "UP" and near_support and (engulf or wick_reject):
             signal = "BUY"
@@ -204,10 +241,7 @@ def generate_signal(pair, timeframe):
         if engulf: confidence += 1
         if wick_reject: confidence += 1
 
-        if signal == "BUY":
-            result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🟢 BUY @ {round(price,5)}"
-        else:
-            result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🔴 SELL @ {round(price,5)}"
+        entry_text = "🟢 BUY" if signal == "BUY" else "🔴 SELL"
 
         amount = get_trade_amount()
         timing = get_entry_timing(timeframe)
@@ -215,10 +249,11 @@ def generate_signal(pair, timeframe):
         return f"""
 📊 Sigma AI ELITE SNIPER
 
-💱 Pair: {pair}
-⏱ TF: {timeframe}
+🕒 Session: {session}
 
-{result}
+🔥 ENTER NOW (SNIPER ENTRY)
+{entry_text} @ {round(price,5)}
+
 {timing}
 
 🔥 Confidence: {confidence}/6
@@ -236,15 +271,12 @@ def generate_signal(pair, timeframe):
         print(e)
         return "❌ Error"
 
+# === TELEGRAM ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
         return
     await update.message.reply_text("🚀 Bot Started", reply_markup=main_menu())
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text.lower() in ["start bot", "🚀 start bot"]:
-        await start(update, context)
 
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global WIN, LOSS
@@ -256,12 +288,12 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "result_win":
         WIN += 1
         reset_martingale()
-        await query.edit_message_text(f"✅ WIN\n\nWins: {WIN}\nLoss: {LOSS}")
+        await query.edit_message_text(f"✅ WIN\nWins: {WIN}\nLoss: {LOSS}")
 
     elif data == "result_loss":
         LOSS += 1
         increase_martingale()
-        await query.edit_message_text(f"❌ LOSS\n\nWins: {WIN}\nLoss: {LOSS}\nMartingale: {MARTINGALE_STEP}")
+        await query.edit_message_text(f"❌ LOSS\nWins: {WIN}\nLoss: {LOSS}\nMartingale: {MARTINGALE_STEP}")
 
     elif data == "forex":
         await query.edit_message_text("Choose Forex:", reply_markup=forex_menu())
@@ -285,12 +317,16 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif "_" in data:
         pair, tf = data.split("_")
         result = generate_signal(pair, tf)
-        await query.edit_message_text(result, parse_mode="Markdown", reply_markup=result_buttons())
+        await query.edit_message_text(result, reply_markup=result_buttons())
 
+# === RUN BOT ===
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(handle_buttons))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-app.run_polling()
+async def main():
+    asyncio.create_task(session_notifier(app))
+    await app.run_polling()
+
+asyncio.run(main())
