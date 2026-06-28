@@ -79,6 +79,18 @@ async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
                 text=f"{session}\n\n💡 Market is active — look for sniper entries!"
             )
 
+# === 🆕 AUTO SNIPER SYSTEM ===
+async def auto_sniper(context: ContextTypes.DEFAULT_TYPE):
+    for pair in PAIRS:
+        signal = generate_signal(pair, "1m")
+
+        if ("ENTER NOW" in signal) and ("Confidence: 5" in signal or "Confidence: 6" in signal):
+            for user_id in ALLOWED_USERS:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"🚨 AUTO SNIPER SIGNAL 🚨\n\n{signal}"
+                )
+
 # === RESULT BUTTONS ===
 def result_buttons():
     return InlineKeyboardMarkup([
@@ -256,7 +268,6 @@ def generate_signal(pair, timeframe):
 📊 RSI: {round(rsi,2)}
 📊 Trend: {trend}
 """
-
     except Exception as e:
         print(e)
         return "❌ Error"
@@ -317,8 +328,13 @@ app = ApplicationBuilder().token(TOKEN).build()
 # ✅ RUN SESSION NOTIFIER
 app.job_queue.run_repeating(session_notifier, interval=300, first=10)
 
+# 🔥 AUTO SNIPER (NEW)
+app.job_queue.run_repeating(auto_sniper, interval=30, first=15)
+
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(handle_buttons))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+app.run_polling()dle_text))
 
 app.run_polling()
