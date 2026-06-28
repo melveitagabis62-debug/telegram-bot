@@ -10,6 +10,34 @@ import datetime
 TOKEN = os.getenv("TOKEN")
 ALLOWED_USERS = [6351041498]
 
+# === NEW: TRACKING SYSTEM ===
+WIN = 0
+LOSS = 0
+MARTINGALE_STEP = 0
+MARTINGALE_ENABLED = True
+
+def get_trade_amount(base=1):
+    if not MARTINGALE_ENABLED:
+        return base
+    return base * (2 ** MARTINGALE_STEP)
+
+def reset_martingale():
+    global MARTINGALE_STEP
+    MARTINGALE_STEP = 0
+
+def increase_martingale():
+    global MARTINGALE_STEP
+    MARTINGALE_STEP += 1
+
+# === NEW: RESULT BUTTONS ===
+def result_buttons():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ WIN", callback_data="result_win"),
+            InlineKeyboardButton("❌ LOSS", callback_data="result_loss")
+        ]
+    ])
+
 PAIRS = [
     "EURUSD", "GBPUSD", "USDJPY", "AUDUSD",
     "USDCAD", "USDCHF", "NZDUSD",
@@ -74,9 +102,7 @@ def get_analysis(symbol, interval):
     )
     return handler.get_analysis()
 
-# 🔥 NEWS FILTER (placeholder)
 def is_news_time():
-    # You can connect real API later
     return False
 
 def generate_signal(pair, timeframe):
@@ -87,14 +113,10 @@ def generate_signal(pair, timeframe):
             "15m": Interval.INTERVAL_15_MINUTES
         }
 
-        # ✅ SESSION FILTER (IMPROVED)
         hour = datetime.datetime.utcnow().hour
-
-        # London (7–16 UTC) + New York (13–22 UTC)
         if not (7 <= hour <= 22):
             return "⛔ Trade only London/New York session"
 
-        # ❌ NEWS FILTER
         if is_news_time():
             return "⛔ High impact news — avoid trading"
 
@@ -107,7 +129,6 @@ def generate_signal(pair, timeframe):
         high = analysis.indicators["high"]
         low = analysis.indicators["low"]
 
-        # TREND FUNCTION
         def get_trend(tf):
             a = get_analysis(pair, interval_map[tf])
             return "UP" if a.indicators["close"] > a.indicators["EMA50"] else "DOWN"
@@ -116,29 +137,23 @@ def generate_signal(pair, timeframe):
         trend_5m = get_trend("5m")
         trend_15m = get_trend("15m")
 
-        # ❌ NO ALIGNMENT
         if not (trend_1m == trend_5m == trend_15m):
             return "⛔ No Trade (trend mismatch)"
 
-        # ✅ STRONG TREND FILTER
         trend_strength = abs(price - ema50) / price
         if trend_strength < 0.0015:
             return "⛔ Weak trend"
 
-        # ✅ VOLATILITY
         range_size = (high - low) / price
         if range_size < 0.001:
             return "⛔ Low volatility"
 
-        # ❌ CONSOLIDATION
         if 45 < rsi < 55:
             return "⛔ Market ranging"
 
-        # SUPPORT / RESISTANCE
         near_support = abs(price - low) / price < 0.0015
         near_resistance = abs(price - high) / price < 0.0015
 
-        # SIGNAL LOGIC
         signal = "HOLD"
 
         if (rsi < 30 and near_support):
@@ -150,7 +165,6 @@ def generate_signal(pair, timeframe):
         elif trend_1m == "DOWN":
             signal = "SELL"
 
-        # CANDLE CONFIRMATION
         bullish = price > open_price
         bearish = price < open_price
 
@@ -159,18 +173,15 @@ def generate_signal(pair, timeframe):
         if signal == "SELL" and not bearish:
             return "⏳ Waiting bearish candle"
 
-        # ENTRY FILTER (VERY IMPORTANT FOR REAL MONEY)
         if abs(price - ema50) / price > 0.002:
             return "⏳ Wait for pullback to EMA50"
 
-        # ✅ EXPIRATION LOGIC (BEST FOR POCKET OPTION)
         expiration = {
             "1m": "2-3 minutes",
             "5m": "5-10 minutes",
             "15m": "15-30 minutes"
         }[timeframe]
 
-        # CONFIDENCE
         confidence = 0
         if trend_1m == trend_5m == trend_15m:
             confidence += 2
@@ -187,6 +198,9 @@ def generate_signal(pair, timeframe):
         elif signal == "SELL":
             result = f"🔴 SELL @ {round(price,5)}"
 
+        # === ADD TRADE INFO ===
+        amount = get_trade_amount()
+
         return f"""
 📊 **Sigma AI PRO MAX (REAL MODE)**
 
@@ -195,6 +209,9 @@ def generate_signal(pair, timeframe):
 
 📈 {result}
 🔥 Confidence: {confidence}/6
+
+💰 Amount: {amount}
+📉 Martingale: {MARTINGALE_STEP}
 
 ⏳ Expiration: {expiration}
 
@@ -216,12 +233,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text.lower() in ["start bot", "🚀 start bot"]:
         await start(update, context)
 
+# === HANDLE BUTTONS (UPDATED) ===
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global WIN, LOSS
+
     query = update.callback_query
     await query.answer()
     data = query.data
 
-    if data == "forex":
+    # RESULT BUTTONS
+    if data == "result_win":
+        WIN += 1
+        reset_martingale()
+        await query.edit_message_text(f"✅ WIN\n\nWins: {WIN}\nLoss: {LOSS}")
+
+    elif data == "result_loss":
+        LOSS += 1
+        increase_martingale()
+        await query.edit_message_text(f"❌ LOSS\n\nWins: {WIN}\nLoss: {LOSS}\nMartingale: {MARTINGALE_STEP}")
+
+    elif data == "forex":
         await query.edit_message_text("Choose Forex:", reply_markup=forex_menu())
 
     elif data == "crypto":
@@ -243,7 +274,9 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif "_" in data:
         pair, tf = data.split("_")
         result = generate_signal(pair, tf)
-        await query.edit_message_text(result, parse_mode="Markdown")
+
+        # 🔥 SEND WITH BUTTONS
+        await query.edit_message_text(result, parse_mode="Markdown", reply_markup=result_buttons())
 
 app = ApplicationBuilder().token(TOKEN).build()
 
