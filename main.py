@@ -87,7 +87,7 @@ async def session_notifier(app):
             for user_id in ALLOWED_USERS:
                 try:
                     await app.bot.send_message(chat_id=user_id, text=message)
-                except Exception as e:
+                    except Exception as e:
                     print(e)
 
         await asyncio.sleep(60)
@@ -272,6 +272,8 @@ def generate_signal(pair, timeframe):
         return "❌ Error"
 
 # === TELEGRAM ===
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
@@ -324,6 +326,7 @@ app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(handle_buttons))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
 async def main():
     asyncio.create_task(session_notifier(app))
