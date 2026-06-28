@@ -84,8 +84,10 @@ def generate_signal(pair, timeframe):
 
         # SESSION FILTER
         hour = datetime.datetime.utcnow().hour
-        if hour < 6 or hour > 20:
-            return "⛔ Bad trading session"
+
+        # London + New York sessions only
+        if not (7 <= hour <= 16 or 13 <= hour <= 22):
+            return "⛔ Avoid Asian session (low quality market)"
 
         analysis = get_analysis(pair, interval_map[timeframe])
 
