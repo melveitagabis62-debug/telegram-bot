@@ -6,6 +6,7 @@ from tradingview_ta import TA_Handler, Interval
 import logging
 import os
 import datetime
+import asyncio  # ✅ NEW
 
 TOKEN = os.getenv("TOKEN")
 ALLOWED_USERS = [6351041498]
@@ -30,7 +31,7 @@ def increase_martingale():
     MARTINGALE_STEP += 1
 
 # === ENTRY TIMING SYSTEM ===
-def get_entry_timing(timeframe):
+def get_precise_entry_timing(timeframe):
     now = datetime.datetime.utcnow()
 
     if timeframe == "1m":
@@ -47,12 +48,14 @@ def get_entry_timing(timeframe):
 
     remaining = total_seconds - seconds_passed
 
-    if remaining > total_seconds * 0.6:
-        return f"⏳ WAIT ({remaining}s left in candle)"
-    elif remaining > total_seconds * 0.2:
+    if remaining > 10:
+        return f"⏳ WAIT ({remaining}s left)"
+    elif 5 < remaining <= 10:
         return f"⚠️ PREPARE ({remaining}s)"
+    elif 1 < remaining <= 5:
+        return f"🔢 ENTRY IN {remaining}..."
     else:
-        return f"🔥 ENTER NOW ({remaining}s to new candle)"
+        return "🚀 ENTER NOW!"
 
 # === SESSION DETECTION ===
 def get_trading_session():
@@ -79,7 +82,7 @@ async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
                 text=f"{session}\n\n💡 Market is active — look for sniper entries!"
             )
 
-# === 🆕 AUTO SNIPER SYSTEM ===
+# === AUTO SNIPER SYSTEM ===
 async def auto_sniper(context: ContextTypes.DEFAULT_TYPE):
     for pair in PAIRS:
         signal = generate_signal(pair, "1m")
@@ -158,7 +161,7 @@ def get_analysis(symbol, interval):
 def is_news_time():
     return False
 
-# === ADVANCED STRUCTURE ===
+# === STRATEGY ===
 def is_fake_breakout(open_price, close, high, low):
     body = abs(close - open_price)
     wick = high - low
@@ -201,9 +204,6 @@ def generate_signal(pair, timeframe):
         high = analysis.indicators["high"]
         low = analysis.indicators["low"]
 
-        prev_open = open_price
-        prev_close = price
-
         if is_no_trade_zone(rsi, price, ema50, high, low):
             return "⛔ No Trade Zone (choppy market)"
 
@@ -220,7 +220,7 @@ def generate_signal(pair, timeframe):
 
         signal = None
 
-        engulf = detect_engulfing(open_price, price, prev_open, prev_close)
+        engulf = detect_engulfing(open_price, price, open_price, price)
         wick_reject = rejection_wick(open_price, price, high, low)
 
         if trend == "UP" and near_support and (engulf or wick_reject):
@@ -231,23 +231,14 @@ def generate_signal(pair, timeframe):
         if not signal:
             return "⏳ Waiting for sniper setup"
 
-        expiration = {
-            "1m": "2-3 minutes",
-            "5m": "5-10 minutes",
-            "15m": "15-30 minutes"
-        }[timeframe]
-
         confidence = 4
         if engulf: confidence += 1
         if wick_reject: confidence += 1
 
-        if signal == "BUY":
-            result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🟢 BUY @ {round(price,5)}"
-        else:
-            result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🔴 SELL @ {round(price,5)}"
+        result = f"🟢 BUY @ {round(price,5)}" if signal == "BUY" else f"🔴 SELL @ {round(price,5)}"
 
         amount = get_trade_amount()
-        timing = get_entry_timing(timeframe)
+        timing = get_precise_entry_timing(timeframe)
 
         return f"""
 📊 Sigma AI ELITE SNIPER
@@ -255,6 +246,7 @@ def generate_signal(pair, timeframe):
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
 
+🔥 ENTER NOW (SNIPER)
 {result}
 {timing}
 
@@ -262,14 +254,8 @@ def generate_signal(pair, timeframe):
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
-
-⏳ Expiration: {expiration}
-
-📊 RSI: {round(rsi,2)}
-📊 Trend: {trend}
 """
-    except Exception as e:
-        print(e)
+    except:
         return "❌ Error"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -277,10 +263,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Not authorized")
         return
     await update.message.reply_text("🚀 Bot Started", reply_markup=main_menu())
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text.lower() in ["start bot", "🚀 start bot"]:
-        await start(update, context)
 
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global WIN, LOSS
@@ -320,19 +302,27 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif "_" in data:
         pair, tf = data.split("_")
+
+        msg = await query.edit_message_text("⏳ Syncing with live candle...")
+
+        for i in range(3, 0, -1):
+            await msg.edit_text(f"🔢 Entry in {i}...")
+            await asyncio.sleep(1)
+
+        await msg.edit_text("🚀 ENTERING TRADE...")
+
         result = generate_signal(pair, tf)
-        await query.edit_message_text(result, parse_mode="Markdown", reply_markup=result_buttons())
+
+        await query.edit_message_text(
+            result,
+            reply_markup=result_buttons()
+        )
 
 app = ApplicationBuilder().token(TOKEN).build()
 
-# ✅ RUN SESSION NOTIFIER
 app.job_queue.run_repeating(session_notifier, interval=300, first=10)
-
-# 🔥 AUTO SNIPER (NEW)
 app.job_queue.run_repeating(auto_sniper, interval=30, first=15)
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(handle_buttons))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
 app.run_polling()
