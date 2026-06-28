@@ -74,6 +74,11 @@ def get_analysis(symbol, interval):
     )
     return handler.get_analysis()
 
+# 🔥 NEWS FILTER (placeholder)
+def is_news_time():
+    # You can connect real API later
+    return False
+
 def generate_signal(pair, timeframe):
     try:
         interval_map = {
@@ -82,12 +87,16 @@ def generate_signal(pair, timeframe):
             "15m": Interval.INTERVAL_15_MINUTES
         }
 
-        # SESSION FILTER
+        # ✅ SESSION FILTER (IMPROVED)
         hour = datetime.datetime.utcnow().hour
 
-        # London + New York sessions only
-        if not (7 <= hour <= 16 or 13 <= hour <= 22):
-            return "⛔ Avoid Asian session (low quality market)"
+        # London (7–16 UTC) + New York (13–22 UTC)
+        if not (7 <= hour <= 22):
+            return "⛔ Trade only London/New York session"
+
+        # ❌ NEWS FILTER
+        if is_news_time():
+            return "⛔ High impact news — avoid trading"
 
         analysis = get_analysis(pair, interval_map[timeframe])
 
@@ -107,39 +116,34 @@ def generate_signal(pair, timeframe):
         trend_5m = get_trend("5m")
         trend_15m = get_trend("15m")
 
+        # ❌ NO ALIGNMENT
         if not (trend_1m == trend_5m == trend_15m):
-            return "⛔ No Trade (timeframes not aligned)"
+            return "⛔ No Trade (trend mismatch)"
 
-        # TREND STRENGTH FILTER
+        # ✅ STRONG TREND FILTER
         trend_strength = abs(price - ema50) / price
-        if trend_strength < 0.001:
+        if trend_strength < 0.0015:
             return "⛔ Weak trend"
 
-        # VOLATILITY FILTER
+        # ✅ VOLATILITY
         range_size = (high - low) / price
         if range_size < 0.001:
             return "⛔ Low volatility"
 
-        # NO TRADE ZONE
-        if 40 < rsi < 60:
-            return "⛔ Consolidation zone"
+        # ❌ CONSOLIDATION
+        if 45 < rsi < 55:
+            return "⛔ Market ranging"
 
         # SUPPORT / RESISTANCE
         near_support = abs(price - low) / price < 0.0015
         near_resistance = abs(price - high) / price < 0.0015
 
-        # SMC BIAS
-        smc_bias = "NEUTRAL"
-        if price > high:
-            smc_bias = "BULLISH"
-        elif price < low:
-            smc_bias = "BEARISH"
-
+        # SIGNAL LOGIC
         signal = "HOLD"
 
-        if (rsi < 30 and near_support) or smc_bias == "BULLISH":
+        if (rsi < 30 and near_support):
             signal = "BUY"
-        elif (rsi > 70 and near_resistance) or smc_bias == "BEARISH":
+        elif (rsi > 70 and near_resistance):
             signal = "SELL"
         elif trend_1m == "UP":
             signal = "BUY"
@@ -147,28 +151,35 @@ def generate_signal(pair, timeframe):
             signal = "SELL"
 
         # CANDLE CONFIRMATION
-        bullish_candle = price > open_price
-        bearish_candle = price < open_price
+        bullish = price > open_price
+        bearish = price < open_price
 
-        if signal == "BUY" and not bullish_candle:
-            return "⏳ Waiting bullish confirmation"
-        if signal == "SELL" and not bearish_candle:
-            return "⏳ Waiting bearish confirmation"
+        if signal == "BUY" and not bullish:
+            return "⏳ Waiting bullish candle"
+        if signal == "SELL" and not bearish:
+            return "⏳ Waiting bearish candle"
 
-        # ENTRY TIMING
+        # ENTRY FILTER (VERY IMPORTANT FOR REAL MONEY)
         if abs(price - ema50) / price > 0.002:
-            return "⏳ Wait for EMA50 retest"
+            return "⏳ Wait for pullback to EMA50"
 
-        # CONFIDENCE SCORE
+        # ✅ EXPIRATION LOGIC (BEST FOR POCKET OPTION)
+        expiration = {
+            "1m": "2-3 minutes",
+            "5m": "5-10 minutes",
+            "15m": "15-30 minutes"
+        }[timeframe]
+
+        # CONFIDENCE
         confidence = 0
         if trend_1m == trend_5m == trend_15m:
-            confidence += 2
-        if smc_bias != "NEUTRAL":
             confidence += 2
         if near_support or near_resistance:
             confidence += 1
         if rsi < 30 or rsi > 70:
             confidence += 1
+        if trend_strength > 0.002:
+            confidence += 2
 
         result = "🟡 HOLD"
         if signal == "BUY":
@@ -177,7 +188,7 @@ def generate_signal(pair, timeframe):
             result = f"🔴 SELL @ {round(price,5)}"
 
         return f"""
-📊 **Sigma AI PRO MAX**
+📊 **Sigma AI PRO MAX (REAL MODE)**
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -185,9 +196,10 @@ def generate_signal(pair, timeframe):
 📈 {result}
 🔥 Confidence: {confidence}/6
 
+⏳ Expiration: {expiration}
+
 📊 RSI: {round(rsi,2)}
 📊 Trend: {trend_1m}/{trend_5m}/{trend_15m}
-🧠 Bias: {smc_bias}
 """
 
     except Exception as e:
