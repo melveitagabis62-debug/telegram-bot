@@ -160,35 +160,40 @@ def generate_signal(pair, timeframe):
 
         rsi = analysis.indicators["RSI"]
         ema50 = analysis.indicators["EMA50"]
+        ema9 = analysis.indicators.get("EMA9", ema50)
+        ema21 = analysis.indicators.get("EMA21", ema50)
+
         price = analysis.indicators["close"]
+
         macd = analysis.indicators.get("MACD.macd", 0)
         macd_signal = analysis.indicators.get("MACD.signal", 0)
 
         trend = "UP" if price > ema50 else "DOWN"
 
-        # 🔥 NEW: MOMENTUM STRENGTH
+        # 🔥 MOMENTUM STRENGTH
         distance = abs(price - ema50)
-
-        # dynamic threshold (works for all pairs)
         strength_threshold = price * 0.0005
-
         strong_momentum = distance > strength_threshold
 
+        # 🔥 MICRO TREND
+        micro_up = ema9 > ema21
+        micro_down = ema9 < ema21
+
         if trend == "UP":
-            if 45 < rsi < 70 and macd > macd_signal and strong_momentum:
-                result = f"🔥 STRONG BUY\n🟢 BUY @ {round(price,5)}"
-            elif macd > macd_signal:
-                result = f"⚡ QUICK BUY\n🟢 BUY @ {round(price,5)}"
+            if 45 < rsi < 70 and macd > macd_signal and strong_momentum and micro_up:
+                result = f"🔥 ULTRA BUY\n🟢 BUY @ {round(price,5)}"
+            elif macd > macd_signal and micro_up:
+                result = f"⚡ STRONG BUY\n🟢 BUY @ {round(price,5)}"
             else:
-                result = f"📈 SCALP BUY\n🟢 BUY @ {round(price,5)}"
+                result = f"📈 QUICK BUY\n🟢 BUY @ {round(price,5)}"
 
         else:
-            if 30 < rsi < 55 and macd < macd_signal and strong_momentum:
-                result = f"🔥 STRONG SELL\n🔴 SELL @ {round(price,5)}"
-            elif macd < macd_signal:
-                result = f"⚡ QUICK SELL\n🔴 SELL @ {round(price,5)}"
+            if 30 < rsi < 55 and macd < macd_signal and strong_momentum and micro_down:
+                result = f"🔥 ULTRA SELL\n🔴 SELL @ {round(price,5)}"
+            elif macd < macd_signal and micro_down:
+                result = f"⚡ STRONG SELL\n🔴 SELL @ {round(price,5)}"
             else:
-                result = f"📉 SCALP SELL\n🔴 SELL @ {round(price,5)}"
+                result = f"📉 QUICK SELL\n🔴 SELL @ {round(price,5)}"
 
         expiration = {
             "1m": "2-3 minutes",
@@ -200,7 +205,7 @@ def generate_signal(pair, timeframe):
         timing = get_entry_timing(timeframe)
 
         return f"""
-📊 Sigma AI SMART MODE v2
+📊 Sigma AI SMART MODE v3
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -208,7 +213,7 @@ def generate_signal(pair, timeframe):
 {result}
 {timing}
 
-⚡ Mode: HIGH ACCURACY + HIGH SIGNAL FLOW
+⚡ Mode: HIGH ACCURACY ENGINE
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
@@ -219,6 +224,7 @@ def generate_signal(pair, timeframe):
 📊 Trend: {trend}
 📊 MACD: {'Bullish' if macd > macd_signal else 'Bearish'}
 📊 Strength: {'Strong' if strong_momentum else 'Weak'}
+📊 Micro Trend: {'UP' if micro_up else 'DOWN'}
 """
 
     except Exception as e:
