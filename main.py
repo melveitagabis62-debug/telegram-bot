@@ -170,7 +170,7 @@ def generate_signal(pair, timeframe):
 
         trend = "UP" if price > ema50 else "DOWN"
 
-        # 🔥 MOMENTUM STRENGTH
+        # 🔥 MOMENTUM
         distance = abs(price - ema50)
         strength_threshold = price * 0.0005
         strong_momentum = distance > strength_threshold
@@ -179,21 +179,36 @@ def generate_signal(pair, timeframe):
         micro_up = ema9 > ema21
         micro_down = ema9 < ema21
 
+        # 🔥 NEW: REVERSAL RISK FILTER
+        overbought = rsi > 75
+        oversold = rsi < 25
+
+        signal_label = ""
+        result = ""
+
         if trend == "UP":
-            if 45 < rsi < 70 and macd > macd_signal and strong_momentum and micro_up:
-                result = f"🔥 ULTRA BUY\n🟢 BUY @ {round(price,5)}"
+            if overbought:
+                signal_label = "⚠️ RISKY BUY (Overbought)"
+            elif 45 < rsi < 70 and macd > macd_signal and strong_momentum and micro_up:
+                signal_label = "🔥 ULTRA BUY"
             elif macd > macd_signal and micro_up:
-                result = f"⚡ STRONG BUY\n🟢 BUY @ {round(price,5)}"
+                signal_label = "⚡ STRONG BUY"
             else:
-                result = f"📈 QUICK BUY\n🟢 BUY @ {round(price,5)}"
+                signal_label = "📈 NORMAL BUY"
+
+            result = f"{signal_label}\n🟢 BUY @ {round(price,5)}"
 
         else:
-            if 30 < rsi < 55 and macd < macd_signal and strong_momentum and micro_down:
-                result = f"🔥 ULTRA SELL\n🔴 SELL @ {round(price,5)}"
+            if oversold:
+                signal_label = "⚠️ RISKY SELL (Oversold)"
+            elif 30 < rsi < 55 and macd < macd_signal and strong_momentum and micro_down:
+                signal_label = "🔥 ULTRA SELL"
             elif macd < macd_signal and micro_down:
-                result = f"⚡ STRONG SELL\n🔴 SELL @ {round(price,5)}"
+                signal_label = "⚡ STRONG SELL"
             else:
-                result = f"📉 QUICK SELL\n🔴 SELL @ {round(price,5)}"
+                signal_label = "📉 NORMAL SELL"
+
+            result = f"{signal_label}\n🔴 SELL @ {round(price,5)}"
 
         expiration = {
             "1m": "2-3 minutes",
@@ -205,7 +220,7 @@ def generate_signal(pair, timeframe):
         timing = get_entry_timing(timeframe)
 
         return f"""
-📊 Sigma AI SMART MODE v3
+📊 Sigma AI SMART MODE v4
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -213,7 +228,7 @@ def generate_signal(pair, timeframe):
 {result}
 {timing}
 
-⚡ Mode: HIGH ACCURACY ENGINE
+⚡ Mode: PRECISION FLOW (High Accuracy + Many Signals)
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
@@ -226,7 +241,6 @@ def generate_signal(pair, timeframe):
 📊 Strength: {'Strong' if strong_momentum else 'Weak'}
 📊 Micro Trend: {'UP' if micro_up else 'DOWN'}
 """
-
     except Exception as e:
         print(e)
         return "❌ Error"
