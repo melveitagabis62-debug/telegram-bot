@@ -52,7 +52,7 @@ def get_entry_timing(timeframe):
     elif remaining > total_seconds * 0.2:
         return f"⚠️ PREPARE ({remaining}s)"
     else:
-        return f"🔥 ENTER NOW ({remaining}s to new candle)"
+        return f"🚀 Perfect Timing ({remaining}s to new candle)"
 
 # === SESSION DETECTION ===
 def get_trading_session():
