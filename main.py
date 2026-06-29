@@ -253,16 +253,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= RUN =================
 
+print("Bot running...")
+
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT, start_button))
 
-async def main():
-    print("Bot running...")
+# start background loop safely
+async def post_init(app):
     asyncio.create_task(auto_signal_loop(app))
-    await app.run_polling()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+app.post_init = post_init
+
+app.run_polling()
