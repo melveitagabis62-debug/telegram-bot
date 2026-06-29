@@ -76,7 +76,7 @@ async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
         for user_id in ALLOWED_USERS:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"{session}\n\n💡 Market is active — look for sniper entries!"
+                text=f"{session}\n\n💡 Market is active — spam mode ON!"
             )
 
 # === RESULT BUTTONS ===
@@ -143,31 +143,7 @@ def get_analysis(symbol, interval):
     )
     return handler.get_analysis()
 
-def is_news_time():
-    return False
-
-# === ADVANCED STRUCTURE ===
-def is_fake_breakout(open_price, close, high, low):
-    body = abs(close - open_price)
-    wick = high - low
-    return wick > body * 2
-
-def detect_engulfing(open_p, close_p, prev_open, prev_close):
-    return (close_p > open_p and prev_close < prev_open and close_p > prev_open) or \
-           (close_p < open_p and prev_close > prev_open and close_p < prev_open)
-
-def rejection_wick(open_p, close_p, high, low):
-    body = abs(close_p - open_p)
-    upper_wick = high - max(open_p, close_p)
-    lower_wick = min(open_p, close_p) - low
-    return upper_wick > body * 2 or lower_wick > body * 2
-
-def is_no_trade_zone(rsi, price, ema, high, low):
-    small_candle = (high - low) / price < 0.0008
-    flat_ema = abs(price - ema) / price < 0.0005
-    mid_rsi = 45 < rsi < 55
-    return small_candle and flat_ema and mid_rsi
-
+# === SIGNAL GENERATION (AGGRESSIVE MODE) ===
 def generate_signal(pair, timeframe):
     try:
         interval_map = {
@@ -185,39 +161,16 @@ def generate_signal(pair, timeframe):
         rsi = analysis.indicators["RSI"]
         ema50 = analysis.indicators["EMA50"]
         price = analysis.indicators["close"]
-        open_price = analysis.indicators["open"]
-        high = analysis.indicators["high"]
-        low = analysis.indicators["low"]
-
-        prev_open = open_price
-        prev_close = price
-
-        if is_no_trade_zone(rsi, price, ema50, high, low):
-            return "⛔ No Trade Zone (choppy market)"
 
         trend = "UP" if price > ema50 else "DOWN"
 
-        if is_fake_breakout(open_price, price, high, low):
-            return "⛔ Fake breakout"
-
-        support = low
-        resistance = high
-
-        near_support = abs(price - support) / price < 0.0015
-        near_resistance = abs(price - resistance) / price < 0.0015
-
-        signal = None
-
-        engulf = detect_engulfing(open_price, price, prev_open, prev_close)
-        wick_reject = rejection_wick(open_price, price, high, low)
-
-        if trend == "UP" and near_support and (engulf or wick_reject):
+        # 🔥 ALWAYS GIVE SIGNAL (NO MORE WAITING)
+        if trend == "UP":
             signal = "BUY"
-        elif trend == "DOWN" and near_resistance and (engulf or wick_reject):
+            result = f"🔥 ENTER NOW\n🟢 BUY @ {round(price,5)}"
+        else:
             signal = "SELL"
-
-        if not signal:
-            return "⏳ Waiting for sniper setup"
+            result = f"🔥 ENTER NOW\n🔴 SELL @ {round(price,5)}"
 
         expiration = {
             "1m": "2-3 minutes",
@@ -225,20 +178,11 @@ def generate_signal(pair, timeframe):
             "15m": "15-30 minutes"
         }[timeframe]
 
-        confidence = 4
-        if engulf: confidence += 1
-        if wick_reject: confidence += 1
-
-        if signal == "BUY":
-            result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🟢 BUY @ {round(price,5)}"
-        else:
-            result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🔴 SELL @ {round(price,5)}"
-
         amount = get_trade_amount()
         timing = get_entry_timing(timeframe)
 
         return f"""
-📊 Sigma AI ELITE SNIPER
+📊 Sigma AI RAPID MODE
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -246,7 +190,7 @@ def generate_signal(pair, timeframe):
 {result}
 {timing}
 
-🔥 Confidence: {confidence}/6
+⚡ Mode: AGGRESSIVE (Many Signals)
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
@@ -265,7 +209,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
         return
-    await update.message.reply_text("🚀 Bot Started", reply_markup=main_menu())
+    await update.message.reply_text("🚀 Bot Started (RAPID MODE)", reply_markup=main_menu())
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text.lower() in ["start bot", "🚀 start bot"]:
@@ -314,7 +258,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 app = ApplicationBuilder().token(TOKEN).build()
 
-# ✅ RUN SESSION NOTIFIER
 app.job_queue.run_repeating(session_notifier, interval=300, first=10)
 
 app.add_handler(CommandHandler("start", start))
@@ -322,4 +265,3 @@ app.add_handler(CallbackQueryHandler(handle_buttons))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
 app.run_polling()
-                
