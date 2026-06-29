@@ -18,6 +18,11 @@ PAIRS = [
     "AUDCAD","AUDCHF","CADCHF"
 ]
 
+# ================= ELITE SETTINGS =================
+COOLDOWN = 180
+last_signal_time = {}
+sent_pre_signal = {}
+
 # ================= MENU =================
 
 def main_menu():
@@ -58,37 +63,37 @@ def get_analysis(symbol, interval):
     )
     return handler.get_analysis()
 
-# ================= TREND =================
+# ================= ELITE FILTERS =================
 
-def get_trend(analysis):
-    price = analysis.indicators["close"]
-    ema200 = analysis.indicators.get("EMA200", price)
+def trend_direction(price, ema50, ema200):
+    if ema50 > ema200 and price > ema50:
+        return "BUY"
+    elif ema50 < ema200 and price < ema50:
+        return "SELL"
+    return None
 
-    if price > ema200:
-        return "UP"
-    elif price < ema200:
-        return "DOWN"
-    return "SIDE"
-
-# ================= SUPPORT / RESISTANCE =================
-
-def get_zones(analysis):
-    highs = analysis.indicators.get("high")
-    lows = analysis.indicators.get("low")
-    return lows, highs
-
-# ================= CANDLE CONFIRMATION =================
-
-def is_bullish_engulfing(open1, close1, open2, close2):
-    return close1 < open1 and close2 > open2 and close2 > open1 and open2 < close1
-
-def is_bearish_engulfing(open1, close1, open2, close2):
-    return close1 > open1 and close2 < open2 and close2 < open1 and open2 > close1
-
-def is_pin_bar(open_, close, high, low):
+def candlestick_signal(open_, close, high, low):
     body = abs(close - open_)
-    wick = (high - low)
-    return wick > body * 2
+    wick = high - low
+
+    if body > wick * 0.5:
+        return True
+    if wick > body * 2:
+        return True
+    return False
+
+def is_near_zone(price, support, resistance):
+    if support and abs(price - support) / price < 0.002:
+        return True
+    if resistance and abs(price - resistance) / price < 0.002:
+        return True
+    return False
+
+def should_send(pair):
+    now = time.time()
+    if pair not in last_signal_time:
+        return True
+    return now - last_signal_time[pair] > COOLDOWN
 
 # ================= SIGNAL =================
 
@@ -103,120 +108,91 @@ def generate_signal(pair, timeframe):
         analysis = get_analysis(pair, interval_map[timeframe])
 
         price = analysis.indicators["close"]
-        rsi = analysis.indicators["RSI"]
-        ema50 = analysis.indicators["EMA50"]
+        ema50 = analysis.indicators.get("EMA50", price)
+        ema200 = analysis.indicators.get("EMA200", price)
+        rsi = analysis.indicators.get("RSI", 50)
 
-        trend = get_trend(analysis)
-        support, resistance = get_zones(analysis)
+        support = analysis.indicators.get("low")
+        resistance = analysis.indicators.get("high")
 
-        # Fake candle data fallback (TradingView TA has limited OHLC history)
-        open1 = analysis.indicators.get("open", price)
-        close1 = price
+        open_ = analysis.indicators.get("open", price)
         high = analysis.indicators.get("high", price)
         low = analysis.indicators.get("low", price)
 
-        # Simulate previous candle
-        open2 = open1
-        close2 = close1
+        direction = trend_direction(price, ema50, ema200)
 
-        bullish = is_bullish_engulfing(open1, close1, open2, close2) or is_pin_bar(open1, close1, high, low)
-        bearish = is_bearish_engulfing(open1, close1, open2, close2) or is_pin_bar(open1, close1, high, low)
+        if not direction:
+            return None
 
-        signal = "HOLD"
-        entry = None
-        reason = ""
+        if not is_near_zone(price, support, resistance):
+            return None
 
-        # BUY LOGIC
-        if trend == "UP" and support and price <= support * 1.002 and rsi < 40 and bullish:
-            signal = "BUY"
-            entry = price
-            reason = "Trend + Support + Bullish Confirmation"
+        if not candlestick_signal(open_, price, high, low):
+            return None
 
-        # SELL LOGIC
-        elif trend == "DOWN" and resistance and price >= resistance * 0.998 and rsi > 60 and bearish:
-            signal = "SELL"
-            entry = price
-            reason = "Trend + Resistance + Bearish Confirmation"
-
-        else:
-            reason = "No valid sniper setup"
-
-        if signal == "BUY":
-            text = "🟢 BUY / CALL"
-        elif signal == "SELL":
-            text = "🔴 SELL / PUT"
-        else:
-            text = "🟡 NO TRADE"
-
-        return f"""
-📊 SNIPER SCALPER SIGNAL
-
-💱 {pair}
-⏱ {timeframe}
-
-📈 {text}
-
-📍 Entry: {entry if entry else "Wait"}
-
-📊 Support: {round(support,5) if support else "-"}
-📊 Resistance: {round(resistance,5) if resistance else "-"}
-
-📊 Trend: {trend}
-⚠️ {reason}
-
-RSI: {round(rsi,2)}
-EMA50: {round(ema50,5)}
-Price: {round(price,5)}
-"""
+        return {
+            "pair": pair,
+            "direction": direction,
+            "price": price,
+            "rsi": rsi,
+            "ema50": ema50,
+            "ema200": ema200,
+            "support": support,
+            "resistance": resistance
+        }
 
     except Exception as e:
         print("ERROR:", e)
-        return "❌ Failed to fetch data."
+        return None
 
-# ================= TIMER =================
-
-def get_candle_time_left(timeframe):
-    now = datetime.datetime.utcnow()
-
-    if timeframe == "1m":
-        return 60 - now.second
-    elif timeframe == "5m":
-        return (5*60) - (now.minute % 5)*60 - now.second
-    elif timeframe == "15m":
-        return (15*60) - (now.minute % 15)*60 - now.second
-    return 60
-
-# ================= AUTO LOOP =================
-
-last_sent = {}
+# ================= AUTO LOOP (ELITE) =================
 
 async def auto_signal_loop(app):
     await asyncio.sleep(10)
 
     while True:
         for pair in PAIRS:
-            now = time.time()
+            data = generate_signal(pair, "1m")
 
-            if pair in last_sent and now - last_sent[pair] < 300:
+            if not data:
                 continue
 
-            last_sent[pair] = now
-            time_left = get_candle_time_left("1m")
-
-            message = f"""
-🚨 SNIPER ALERT
+            # PRE SIGNAL
+            if pair not in sent_pre_signal:
+                msg = f"""
+📡 PRE-SIGNAL
 
 💱 {pair}
-⏰ {time_left}s before candle close
-🎯 Waiting for confirmation...
-"""
+Bias: {data['direction']}
 
-            for user_id in ALLOWED_USERS:
-                await app.bot.send_message(chat_id=user_id, text=message)
+Prepare for next candle
+"""
+                for user_id in ALLOWED_USERS:
+                    await app.bot.send_message(chat_id=user_id, text=msg)
+
+                sent_pre_signal[pair] = True
+                continue
+
+            # ENTRY SIGNAL
+            if should_send(pair):
+                msg = f"""
+🎯 ENTRY SIGNAL
+
+💱 {pair}
+Direction: {data['direction']}
+Entry: Next candle open
+
+RSI: {round(data['rsi'],2)}
+"""
+                for user_id in ALLOWED_USERS:
+                    await app.bot.send_message(chat_id=user_id, text=msg)
+
+                last_signal_time[pair] = time.time()
+                sent_pre_signal[pair] = False
 
             await asyncio.sleep(2)
 
-        await asyncio.sleep(60)
+        await asyncio.sleep(30)
 
 # ================= HANDLERS =================
 
@@ -234,13 +210,6 @@ async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.message.text == "🚀 Start Bot":
         await update.message.reply_text("🚀 Sniper Bot Ready", reply_markup=main_menu())
-
-async def sniper_countdown(query):
-    for i in ["3","2","1"]:
-        await query.edit_message_text(f"🎯 Sniper Entry in {i}...")
-        await asyncio.sleep(1)
-
-    await query.edit_message_text("🚀 ENTER NOW")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -261,10 +230,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif "_" in data:
         pair, tf = data.split("_")
 
-        await sniper_countdown(query)
         result = generate_signal(pair, tf)
-        await asyncio.sleep(1)
-        await query.edit_message_text(result)
+
+        if not result:
+            await query.edit_message_text("🟡 No high-quality setup. Wait...")
+            return
+
+        await query.edit_message_text(f"""
+🎯 MANUAL SIGNAL
+
+💱 {pair}
+Direction: {result['direction']}
+Entry: Next candle open
+""")
 
     elif data == "back_main":
         await query.edit_message_text("🚀 Sniper Bot", reply_markup=main_menu())
@@ -285,5 +263,5 @@ async def post_init(app):
 
 app.post_init = post_init
 
-print("🔥 Sniper Scalper Bot Running...")
+print("🔥 ELITE Sniper Bot Running...")
 app.run_polling()
