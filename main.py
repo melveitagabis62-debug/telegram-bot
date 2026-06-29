@@ -1,5 +1,5 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 from tradingview_ta import TA_Handler, Interval
 import asyncio
@@ -143,47 +143,6 @@ Price: {round(price,5)}
         print("ERROR:", e)
         return "❌ Failed to fetch data."
 
-# ================= SMART DETECTOR =================
-
-def is_good_chart(pair, timeframe):
-    try:
-        interval_map = {
-            "1m": Interval.INTERVAL_1_MINUTE,
-            "5m": Interval.INTERVAL_5_MINUTES,
-            "15m": Interval.INTERVAL_15_MINUTES
-        }
-
-        analysis = get_analysis(pair, interval_map[timeframe])
-
-        rsi = analysis.indicators["RSI"]
-        ema50 = analysis.indicators["EMA50"]
-        price = analysis.indicators["close"]
-
-        support, resistance = get_support_resistance(analysis)
-        distance_from_ema = abs(price - ema50) / price
-
-        if distance_from_ema > 0.003:
-            return False
-
-        if 45 < rsi < 55:
-            return False
-
-        if support and resistance:
-            mid = (support + resistance) / 2
-            if abs(price - mid) / price < 0.0015:
-                return False
-
-        if support and price <= support * 1.002 and rsi < 35:
-            return True
-
-        if resistance and price >= resistance * 0.998 and rsi > 65:
-            return True
-
-        return False
-
-    except:
-        return False
-
 # ================= TIMER =================
 
 def get_candle_time_left(timeframe):
@@ -208,35 +167,27 @@ async def auto_signal_loop(app):
         print("🔄 Scanning market...")
 
         for pair in PAIRS:
-            if is_good_chart(pair, "1m"):
+            now = time.time()
 
-                now = time.time()
-                if pair in last_sent and now - last_sent[pair] < 300:
-                    continue
+            if pair in last_sent and now - last_sent[pair] < 300:
+                continue
 
-                last_sent[pair] = now
+            last_sent[pair] = now
+            time_left = get_candle_time_left("1m")
 
-                time_left = get_candle_time_left("1m")
-
-                message = f"""
+            message = f"""
 🚨 SMART SIGNAL ALERT
 
 💱 {pair}
 
-📊 Clean setup detected
-📍 Near Support/Resistance
-
 ⏰ Wait {time_left}s for next candle
-
-⚡ Then get signal immediately!
-
-🎯 Pocket Option Ready
+⚡ Prepare for entry!
 """
 
-                for user_id in ALLOWED_USERS:
-                    await app.bot.send_message(chat_id=user_id, text=message)
+            for user_id in ALLOWED_USERS:
+                await app.bot.send_message(chat_id=user_id, text=message)
 
-                await asyncio.sleep(3)
+            await asyncio.sleep(2)
 
         await asyncio.sleep(60)
 
@@ -247,10 +198,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ Access Denied")
         return
 
+    keyboard = [["🚀 Start Bot"]]
     await update.message.reply_text(
-        "🚀 Sigma AI Bot Ready",
-        reply_markup=main_menu()
+        "👋 Welcome!",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
+
+async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ALLOWED_USERS:
+        return
+
+    if update.message.text == "🚀 Start Bot":
+        await update.message.reply_text("🚀 Sigma AI Bot Ready", reply_markup=main_menu())
+
+# 🔥 SNIPER COUNTDOWN ADDED HERE
+async def sniper_countdown(query):
+    for i in ["3", "2", "1"]:
+        await query.edit_message_text(f"🎯 Sniper Entry in {i}...")
+        await asyncio.sleep(1)
+
+    await query.edit_message_text("🚀 ENTER NOW (SNIPER ENTRY)")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -270,7 +237,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif "_" in data:
         pair, tf = data.split("_")
+
+        # 🔥 countdown before signal
+        await sniper_countdown(query)
+
         result = generate_signal(pair, tf)
+        await asyncio.sleep(1)
         await query.edit_message_text(result)
 
     elif data == "back_main":
@@ -285,6 +257,7 @@ app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(button_handler))
+app.add_handler(MessageHandler(filters.TEXT, start_button))
 
 async def main():
     print("Bot running...")
