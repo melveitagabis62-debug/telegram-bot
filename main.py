@@ -166,17 +166,29 @@ def generate_signal(pair, timeframe):
 
         trend = "UP" if price > ema50 else "DOWN"
 
+        # 🔥 NEW: MOMENTUM STRENGTH
+        distance = abs(price - ema50)
+
+        # dynamic threshold (works for all pairs)
+        strength_threshold = price * 0.0005
+
+        strong_momentum = distance > strength_threshold
+
         if trend == "UP":
-            if 45 < rsi < 70 and macd > macd_signal:
+            if 45 < rsi < 70 and macd > macd_signal and strong_momentum:
                 result = f"🔥 STRONG BUY\n🟢 BUY @ {round(price,5)}"
-            else:
+            elif macd > macd_signal:
                 result = f"⚡ QUICK BUY\n🟢 BUY @ {round(price,5)}"
+            else:
+                result = f"📈 SCALP BUY\n🟢 BUY @ {round(price,5)}"
 
         else:
-            if 30 < rsi < 55 and macd < macd_signal:
+            if 30 < rsi < 55 and macd < macd_signal and strong_momentum:
                 result = f"🔥 STRONG SELL\n🔴 SELL @ {round(price,5)}"
-            else:
+            elif macd < macd_signal:
                 result = f"⚡ QUICK SELL\n🔴 SELL @ {round(price,5)}"
+            else:
+                result = f"📉 SCALP SELL\n🔴 SELL @ {round(price,5)}"
 
         expiration = {
             "1m": "2-3 minutes",
@@ -188,7 +200,7 @@ def generate_signal(pair, timeframe):
         timing = get_entry_timing(timeframe)
 
         return f"""
-📊 Sigma AI BALANCED MODE
+📊 Sigma AI SMART MODE v2
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -196,7 +208,7 @@ def generate_signal(pair, timeframe):
 {result}
 {timing}
 
-⚡ Mode: SMART AGGRESSIVE
+⚡ Mode: HIGH ACCURACY + HIGH SIGNAL FLOW
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
@@ -206,12 +218,13 @@ def generate_signal(pair, timeframe):
 📊 RSI: {round(rsi,2)}
 📊 Trend: {trend}
 📊 MACD: {'Bullish' if macd > macd_signal else 'Bearish'}
+📊 Strength: {'Strong' if strong_momentum else 'Weak'}
 """
 
     except Exception as e:
         print(e)
         return "❌ Error"
-
+        
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
