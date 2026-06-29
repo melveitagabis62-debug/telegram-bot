@@ -301,8 +301,11 @@ app.add_handler(MessageHandler(filters.TEXT, start_button))
 
 async def main():
     print("Bot running...")
-    asyncio.create_task(auto_signal_loop(app))
+    asyncio.create_task(auto_signal_loop())
     await app.run_polling()
 
-asyncio.run(main())
-        
+    if __name__ == "__main__":
+    import asyncio
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+    loop.run_forever()
