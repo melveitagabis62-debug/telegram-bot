@@ -11,11 +11,12 @@ TOKEN = os.getenv("TOKEN")
 ALLOWED_USERS = [6351041498]
 
 PAIRS = [
-    "EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD",
-    "EURJPY","GBPJPY","AUDJPY","CADJPY","CHFJPY",
-    "EURGBP","EURCHF","EURAUD","EURCAD",
-    "GBPAUD","GBPCAD","GBPCHF",
-    "AUDCAD","AUDCHF","CADCHF"
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "GBPJPY",
+    "EURJPY",
+    "AUDUSD"
 ]
 
 # ================= ELITE SETTINGS =================
@@ -101,44 +102,77 @@ def generate_signal(pair, timeframe):
     try:
         interval_map = {
             "1m": Interval.INTERVAL_1_MINUTE,
-            "5m": Interval.INTERVAL_5_MINUTES,
-            "15m": Interval.INTERVAL_15_MINUTES
+            "5m": Interval.INTERVAL_5_MINUTES
         }
 
-        analysis = get_analysis(pair, interval_map[timeframe])
+        # 🔹 GET 1M (ENTRY)
+        analysis_1m = get_analysis(pair, interval_map["1m"])
 
-        price = analysis.indicators["close"]
-        ema50 = analysis.indicators.get("EMA50", price)
-        ema200 = analysis.indicators.get("EMA200", price)
-        rsi = analysis.indicators.get("RSI", 50)
+        # 🔹 GET 5M (CONFIRMATION)
+        analysis_5m = get_analysis(pair, interval_map["5m"])
 
-        support = analysis.indicators.get("low")
-        resistance = analysis.indicators.get("high")
+        price = analysis_1m.indicators["close"]
 
-        open_ = analysis.indicators.get("open", price)
-        high = analysis.indicators.get("high", price)
-        low = analysis.indicators.get("low", price)
+        ema50_1m = analysis_1m.indicators.get("EMA50", price)
+        ema200_1m = analysis_1m.indicators.get("EMA200", price)
 
-        direction = trend_direction(price, ema50, ema200)
+        ema50_5m = analysis_5m.indicators.get("EMA50", price)
+        ema200_5m = analysis_5m.indicators.get("EMA200", price)
 
-        if not direction:
+        rsi = analysis_1m.indicators.get("RSI", 50)
+
+        support = analysis_1m.indicators.get("low")
+        resistance = analysis_1m.indicators.get("high")
+
+        open_ = analysis_1m.indicators.get("open", price)
+        high = analysis_1m.indicators.get("high", price)
+        low = analysis_1m.indicators.get("low", price)
+
+        # ✅ 5M TREND CONFIRMATION
+        if ema50_5m > ema200_5m:
+            trend_5m = "BUY"
+        elif ema50_5m < ema200_5m:
+            trend_5m = "SELL"
+        else:
             return None
 
-        if not is_near_zone(price, support, resistance):
+        # ✅ 1M ENTRY TREND ALIGNMENT
+        if ema50_1m > ema200_1m and trend_5m == "BUY":
+            direction = "BUY"
+        elif ema50_1m < ema200_1m and trend_5m == "SELL":
+            direction = "SELL"
+        else:
             return None
 
-        if not candlestick_signal(open_, price, high, low):
+        # ✅ ZONE CHECK
+        near_zone = False
+        if support and abs(price - support) / price < 0.002:
+            near_zone = True
+        if resistance and abs(price - resistance) / price < 0.002:
+            near_zone = True
+
+        if not near_zone:
+            return None
+
+        # ✅ CANDLE CONFIRMATION
+        body = abs(price - open_)
+        wick = high - low
+
+        candle_ok = body > wick * 0.5 or wick > body * 2
+        if not candle_ok:
+            return None
+
+        # ✅ RSI FILTER
+        if direction == "BUY" and rsi > 45:
+            return None
+        if direction == "SELL" and rsi < 55:
             return None
 
         return {
             "pair": pair,
             "direction": direction,
             "price": price,
-            "rsi": rsi,
-            "ema50": ema50,
-            "ema200": ema200,
-            "support": support,
-            "resistance": resistance
+            "rsi": rsi
         }
 
     except Exception as e:
