@@ -169,25 +169,44 @@ def generate_signal(pair, timeframe):
 
         # 🔥 Momentum Strength
         distance = abs(price - ema50)
-        strength_threshold = price * 0.0006  # slightly stricter
+        strength_threshold = price * 0.0007
         strong_momentum = distance > strength_threshold
 
-        # 🔥 MACD Strength (NEW)
+        # 🔥 MACD Strength
         macd_strength = abs(macd - macd_signal)
-        strong_macd = macd_strength > 0.00005
+        strong_macd = macd_strength > 0.00006
+
+        # 🔥 NEW: TREND QUALITY FILTER
+        ema_trend_strength = distance / price
+        clean_trend = ema_trend_strength > 0.0004
+
+        # 🔥 NEW: ENTRY POSITION (avoid late entries)
+        entry_ok = distance < (price * 0.002)
 
         if trend == "UP":
-            if 50 < rsi < 65 and macd > macd_signal and strong_momentum and strong_macd:
+            if (52 < rsi < 63 and macd > macd_signal 
+                and strong_momentum and strong_macd 
+                and clean_trend and entry_ok):
+                
                 result = f"🔥 STRONG BUY\n🟢 BUY @ {round(price,5)}"
-            elif 48 < rsi < 68 and macd > macd_signal and strong_macd:
+
+            elif (50 < rsi < 66 and macd > macd_signal 
+                  and strong_macd and clean_trend):
+                
                 result = f"⚡ QUICK BUY\n🟢 BUY @ {round(price,5)}"
             else:
                 return "⏳ No clean setup"
 
         else:
-            if 35 < rsi < 50 and macd < macd_signal and strong_momentum and strong_macd:
+            if (37 < rsi < 48 and macd < macd_signal 
+                and strong_momentum and strong_macd 
+                and clean_trend and entry_ok):
+                
                 result = f"🔥 STRONG SELL\n🔴 SELL @ {round(price,5)}"
-            elif 32 < rsi < 52 and macd < macd_signal and strong_macd:
+
+            elif (34 < rsi < 50 and macd < macd_signal 
+                  and strong_macd and clean_trend):
+                
                 result = f"⚡ QUICK SELL\n🔴 SELL @ {round(price,5)}"
             else:
                 return "⏳ No clean setup"
@@ -202,7 +221,7 @@ def generate_signal(pair, timeframe):
         timing = get_entry_timing(timeframe)
 
         return f"""
-📊 Sigma AI SMART MODE v4
+📊 Sigma AI SMART MODE v5
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -210,7 +229,7 @@ def generate_signal(pair, timeframe):
 {result}
 {timing}
 
-🎯 Mode: BALANCED (Accuracy ↑ / Signals Slightly ↓)
+🎯 Mode: HIGH ACCURACY (Filtered)
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
@@ -220,8 +239,8 @@ def generate_signal(pair, timeframe):
 📊 RSI: {round(rsi,2)}
 📊 Trend: {trend}
 📊 MACD: {'Bullish' if macd > macd_signal else 'Bearish'}
-📊 Strength: {'Strong' if strong_momentum else 'Weak'}
-📊 MACD Power: {'Strong' if strong_macd else 'Weak'}
+📊 Momentum: {'Strong' if strong_momentum else 'Weak'}
+📊 Trend Quality: {'Clean' if clean_trend else 'Choppy'}
 """
 
     except Exception as e:
