@@ -11,34 +11,28 @@ TOKEN = os.getenv("TOKEN")
 ALLOWED_USERS = [6351041498]
 
 PAIRS = [
-    "EURUSD", "GBPUSD", "USDJPY", "AUDUSD",
-    "USDCAD", "USDCHF", "NZDUSD",
-    "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY",
-    "EURGBP", "EURCHF", "EURAUD", "EURCAD",
-    "GBPAUD", "GBPCAD", "GBPCHF",
-    "AUDCAD", "AUDCHF",
-    "CADCHF"
+    "EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD",
+    "EURJPY","GBPJPY","AUDJPY","CADJPY","CHFJPY",
+    "EURGBP","EURCHF","EURAUD","EURCAD",
+    "GBPAUD","GBPCAD","GBPCHF",
+    "AUDCAD","AUDCHF","CADCHF"
 ]
 
 # ================= MENU =================
 
 def main_menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 Forex", callback_data="forex")],
-        [InlineKeyboardButton("💰 Crypto", callback_data="crypto")]
+        [InlineKeyboardButton("📊 Forex", callback_data="forex")]
     ])
 
 def forex_menu():
     keyboard, row = [], []
-
     for i, pair in enumerate(PAIRS, 1):
         display = pair[:3] + "/" + pair[3:]
         row.append(InlineKeyboardButton(display, callback_data=pair))
-
         if i % 2 == 0:
             keyboard.append(row)
             row = []
-
     if row:
         keyboard.append(row)
 
@@ -64,13 +58,37 @@ def get_analysis(symbol, interval):
     )
     return handler.get_analysis()
 
-def get_support_resistance(analysis):
-    try:
-        high = analysis.indicators.get("high")
-        low = analysis.indicators.get("low")
-        return low, high
-    except:
-        return None, None
+# ================= TREND =================
+
+def get_trend(analysis):
+    price = analysis.indicators["close"]
+    ema200 = analysis.indicators.get("EMA200", price)
+
+    if price > ema200:
+        return "UP"
+    elif price < ema200:
+        return "DOWN"
+    return "SIDE"
+
+# ================= SUPPORT / RESISTANCE =================
+
+def get_zones(analysis):
+    highs = analysis.indicators.get("high")
+    lows = analysis.indicators.get("low")
+    return lows, highs
+
+# ================= CANDLE CONFIRMATION =================
+
+def is_bullish_engulfing(open1, close1, open2, close2):
+    return close1 < open1 and close2 > open2 and close2 > open1 and open2 < close1
+
+def is_bearish_engulfing(open1, close1, open2, close2):
+    return close1 > open1 and close2 < open2 and close2 < open1 and open2 > close1
+
+def is_pin_bar(open_, close, high, low):
+    body = abs(close - open_)
+    wick = (high - low)
+    return wick > body * 2
 
 # ================= SIGNAL =================
 
@@ -84,33 +102,44 @@ def generate_signal(pair, timeframe):
 
         analysis = get_analysis(pair, interval_map[timeframe])
 
+        price = analysis.indicators["close"]
         rsi = analysis.indicators["RSI"]
         ema50 = analysis.indicators["EMA50"]
-        price = analysis.indicators["close"]
 
-        support, resistance = get_support_resistance(analysis)
-        distance_from_ema = abs(price - ema50) / price
+        trend = get_trend(analysis)
+        support, resistance = get_zones(analysis)
+
+        # Fake candle data fallback (TradingView TA has limited OHLC history)
+        open1 = analysis.indicators.get("open", price)
+        close1 = price
+        high = analysis.indicators.get("high", price)
+        low = analysis.indicators.get("low", price)
+
+        # Simulate previous candle
+        open2 = open1
+        close2 = close1
+
+        bullish = is_bullish_engulfing(open1, close1, open2, close2) or is_pin_bar(open1, close1, high, low)
+        bearish = is_bearish_engulfing(open1, close1, open2, close2) or is_pin_bar(open1, close1, high, low)
 
         signal = "HOLD"
-        entry_price = None
+        entry = None
         reason = ""
 
-        if distance_from_ema > 0.003:
-            reason = "Strong trend / risky"
-        elif 45 < rsi < 55:
-            reason = "Weak RSI (sideways)"
-        elif support and resistance:
-            mid = (support + resistance) / 2
-            if abs(price - mid) / price < 0.0015:
-                reason = "Middle zone (no edge)"
-
-        if support and price <= support * 1.002 and rsi < 35:
+        # BUY LOGIC
+        if trend == "UP" and support and price <= support * 1.002 and rsi < 40 and bullish:
             signal = "BUY"
-            entry_price = price
+            entry = price
+            reason = "Trend + Support + Bullish Confirmation"
 
-        elif resistance and price >= resistance * 0.998 and rsi > 65:
+        # SELL LOGIC
+        elif trend == "DOWN" and resistance and price >= resistance * 0.998 and rsi > 60 and bearish:
             signal = "SELL"
-            entry_price = price
+            entry = price
+            reason = "Trend + Resistance + Bearish Confirmation"
+
+        else:
+            reason = "No valid sniper setup"
 
         if signal == "BUY":
             text = "🟢 BUY / CALL"
@@ -120,19 +149,20 @@ def generate_signal(pair, timeframe):
             text = "🟡 NO TRADE"
 
         return f"""
-📊 Sigma AI Signal
+📊 SNIPER SCALPER SIGNAL
 
 💱 {pair}
 ⏱ {timeframe}
 
 📈 {text}
 
-📍 Entry: {entry_price if entry_price else "Wait"}
+📍 Entry: {entry if entry else "Wait"}
 
 📊 Support: {round(support,5) if support else "-"}
 📊 Resistance: {round(resistance,5) if resistance else "-"}
 
-⚠️ {reason if reason else "Valid setup"}
+📊 Trend: {trend}
+⚠️ {reason}
 
 RSI: {round(rsi,2)}
 EMA50: {round(ema50,5)}
@@ -164,8 +194,6 @@ async def auto_signal_loop(app):
     await asyncio.sleep(10)
 
     while True:
-        print("🔄 Scanning market...")
-
         for pair in PAIRS:
             now = time.time()
 
@@ -176,12 +204,11 @@ async def auto_signal_loop(app):
             time_left = get_candle_time_left("1m")
 
             message = f"""
-🚨 SMART SIGNAL ALERT
+🚨 SNIPER ALERT
 
 💱 {pair}
-
-⏰ Wait {time_left}s for next candle
-⚡ Prepare for entry!
+⏰ {time_left}s before candle close
+🎯 Waiting for confirmation...
 """
 
             for user_id in ALLOWED_USERS:
@@ -199,25 +226,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     keyboard = [["🚀 Start Bot"]]
-    await update.message.reply_text(
-        "👋 Welcome!",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    )
+    await update.message.reply_text("👋 Welcome!", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
 
 async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         return
 
     if update.message.text == "🚀 Start Bot":
-        await update.message.reply_text("🚀 Sigma AI Bot Ready", reply_markup=main_menu())
+        await update.message.reply_text("🚀 Sniper Bot Ready", reply_markup=main_menu())
 
-# 🔥 SNIPER COUNTDOWN ADDED HERE
 async def sniper_countdown(query):
-    for i in ["3", "2", "1"]:
+    for i in ["3","2","1"]:
         await query.edit_message_text(f"🎯 Sniper Entry in {i}...")
         await asyncio.sleep(1)
 
-    await query.edit_message_text("🚀 ENTER NOW (SNIPER ENTRY)")
+    await query.edit_message_text("🚀 ENTER NOW")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -238,22 +261,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif "_" in data:
         pair, tf = data.split("_")
 
-        # 🔥 countdown before signal
         await sniper_countdown(query)
-
         result = generate_signal(pair, tf)
         await asyncio.sleep(1)
         await query.edit_message_text(result)
 
     elif data == "back_main":
-        await query.edit_message_text("🚀 Sigma AI Bot", reply_markup=main_menu())
+        await query.edit_message_text("🚀 Sniper Bot", reply_markup=main_menu())
 
     elif data == "back_forex":
         await query.edit_message_text("Select Pair:", reply_markup=forex_menu())
 
 # ================= RUN =================
-
-print("Bot running...")
 
 app = ApplicationBuilder().token(TOKEN).build()
 
@@ -261,11 +280,10 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT, start_button))
 
-# start background loop safely
 async def post_init(app):
     asyncio.create_task(auto_signal_loop(app))
 
 app.post_init = post_init
 
+print("🔥 Sniper Scalper Bot Running...")
 app.run_polling()
-        
