@@ -1,5 +1,5 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
 from tradingview_ta import TA_Handler, Interval
 import asyncio
@@ -95,7 +95,6 @@ def generate_signal(pair, timeframe):
         entry_price = None
         reason = ""
 
-        # ❌ Smart no-trade filter
         if distance_from_ema > 0.003:
             reason = "Strong trend / risky"
         elif 45 < rsi < 55:
@@ -105,17 +104,14 @@ def generate_signal(pair, timeframe):
             if abs(price - mid) / price < 0.0015:
                 reason = "Middle zone (no edge)"
 
-        # ✅ Buy near support
         if support and price <= support * 1.002 and rsi < 35:
             signal = "BUY"
             entry_price = price
 
-        # ✅ Sell near resistance
         elif resistance and price >= resistance * 0.998 and rsi > 65:
             signal = "SELL"
             entry_price = price
 
-        # DISPLAY
         if signal == "BUY":
             text = "🟢 BUY / CALL"
         elif signal == "SELL":
@@ -251,18 +247,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ Access Denied")
         return
 
-    keyboard = [["🚀 Start Bot"]]
     await update.message.reply_text(
-        "👋 Welcome!",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        "🚀 Sigma AI Bot Ready",
+        reply_markup=main_menu()
     )
-
-async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ALLOWED_USERS:
-        return
-
-    if update.message.text == "🚀 Start Bot":
-        await update.message.reply_text("🚀 Sigma AI Bot Ready", reply_markup=main_menu())
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -297,16 +285,11 @@ app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(button_handler))
-app.add_handler(MessageHandler(filters.TEXT, start_button))
 
 async def main():
     print("Bot running...")
-    asyncio.create_task(auto_signal_loop())
+    asyncio.create_task(auto_signal_loop(app))
     await app.run_polling()
 
-    if __name__ == "__main__":
-    
-        import asyncio
-    loop = asyncio.get_event_loop()
-    loop.create_task(main())
-    loop.run_forever()
+if __name__ == "__main__":
+    asyncio.run(main())
