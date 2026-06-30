@@ -104,26 +104,26 @@ def generate_signal(pair, tf):
 
         # === IMPROVED SIGNAL LOGIC ===
 
-rsi_prev = analysis.indicators.get("RSI[1]", rsi)
-rsi_up = rsi > rsi_prev
-rsi_down = rsi < rsi_prev
+        rsi_prev = analysis.indicators.get("RSI[1]", rsi)
+        rsi_up = rsi > rsi_prev
+        rsi_down = rsi < rsi_prev
 
-pullback_buy = price <= ema50 * 1.001
-pullback_sell = price >= ema50 * 0.999
+        pullback_buy = price <= ema50 * 1.001
+        pullback_sell = price >= ema50 * 0.999
 
-macd_confirm_buy = macd > macd_signal and macd > 0
-macd_confirm_sell = macd < macd_signal and macd < 0
+        macd_confirm_buy = macd > macd_signal and macd > 0
+        macd_confirm_sell = macd < macd_signal and macd < 0
 
-if trend == "UP":
-    if (
+        if trend == "UP":
+        if (
         52 < rsi < 65
         and rsi_up
         and macd_confirm_buy
         and strong_trend
         and pullback_buy
-    ):
+        ):
         signal = "🔥 STRONG BUY"
-    else:
+  else:
         return None
 
 else:
