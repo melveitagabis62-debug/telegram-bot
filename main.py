@@ -56,14 +56,13 @@ def rejection_wick(open_p, close_p, high, low):
     return upper_wick > body * 2 or lower_wick > body * 2
 
 # ================= SIGNAL ENGINE =================
+
 def generate_signal(pair):
     try:
-        # TRADE SESSION FILTER
         hour = datetime.datetime.utcnow().hour
         if not (7 <= hour <= 22):
             return None
 
-        # MULTI TF
         tf1 = get_analysis(pair, Interval.INTERVAL_1_MINUTE)
         tf5 = get_analysis(pair, Interval.INTERVAL_5_MINUTES)
         tf15 = get_analysis(pair, Interval.INTERVAL_15_MINUTES)
@@ -79,51 +78,57 @@ def generate_signal(pair):
         low = tf1.indicators["low"]
         open_price = tf1.indicators["open"]
 
-        # TREND ALIGNMENT
+        # 🔥 RELAXED TREND (2/3 confirmation)
         trend1 = "UP" if price > ema1 else "DOWN"
         trend5 = "UP" if price > ema5 else "DOWN"
         trend15 = "UP" if price > ema15 else "DOWN"
 
-        if not (trend1 == trend5 == trend15):
+        trend_votes = [trend1, trend5, trend15]
+        if trend_votes.count("UP") >= 2:
+            trend = "UP"
+        elif trend_votes.count("DOWN") >= 2:
+            trend = "DOWN"
+        else:
             return None
 
-        trend = trend1
-
-        # VOLATILITY FILTER
-        if (high - low) / price < 0.0008:
+        # 🔥 LESS STRICT VOLATILITY
+        if (high - low) / price < 0.0005:
             return None
 
-        # RSI FILTER
-        if trend == "UP" and rsi1 < 50:
+        # 🔥 SOFTER RSI
+        if trend == "UP" and rsi1 < 45:
             return None
-        if trend == "DOWN" and rsi1 > 50:
+        if trend == "DOWN" and rsi1 > 55:
             return None
 
-        # SUPPORT / RESISTANCE
+        # 🔥 WIDER ZONES
         support = low
         resistance = high
 
-        near_support = abs(price - support) / price < 0.0015
-        near_resistance = abs(price - resistance) / price < 0.0015
+        near_support = abs(price - support) / price < 0.0025
+        near_resistance = abs(price - resistance) / price < 0.0025
 
-        # CANDLE CONFIRMATION
+        # 🔥 CANDLE (BONUS ONLY)
         engulf = detect_engulfing(open_price, price, open_price, price)
         wick = rejection_wick(open_price, price, high, low)
 
-        signal = None
-
-        if trend == "UP" and near_support and (engulf or wick):
+        if trend == "UP" and near_support:
             signal = "BUY"
 
-        elif trend == "DOWN" and near_resistance and (engulf or wick):
+        elif trend == "DOWN" and near_resistance:
             signal = "SELL"
 
         if not signal:
             return None
 
-        confidence = 4
-        if engulf: confidence += 1
-        if wick: confidence += 1
+        # 🔥 SMART CONFIDENCE
+        confidence = 3
+        if trend1 == trend5 == trend15:
+            confidence += 1
+        if engulf:
+            confidence += 1
+        if wick:
+            confidence += 1
 
         direction = "🟢 BUY" if signal == "BUY" else "🔴 SELL"
         amount = get_trade_amount()
@@ -143,9 +148,10 @@ def generate_signal(pair):
 📉 Martingale: {MARTINGALE_STEP}
 """
 
-    except:
+    except Exception as e:
+    print(f"Error in {pair}: {e}")
         return None
-
+        
 # ================= AUTO SIGNAL LOOP =================
 async def auto_signal(context: ContextTypes.DEFAULT_TYPE):
     for pair in PAIRS:
