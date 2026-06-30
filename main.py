@@ -9,12 +9,11 @@ from telegram import Bot
 import os
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+CHAT_ID = os.getenv("6351041498")
 
 PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD"]
 TIMEFRAME = Interval.INTERVAL_1_MINUTE
 
-bot = Bot(token=BOT_TOKEN)
 
 # =============== SETTINGS =================
 RSI_PERIOD = 14
