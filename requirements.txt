@@ -1,5 +1,2 @@
 python-telegram-bot[job-queue]
-pandas
-ta
 tradingview_ta
-requests
