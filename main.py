@@ -161,37 +161,44 @@ def generate_signal(pair, timeframe):
         analysis = get_analysis(pair, interval_map[timeframe])
 
         rsi = analysis.indicators["RSI"]
+        ema20 = analysis.indicators["EMA20"]
         ema50 = analysis.indicators["EMA50"]
         price = analysis.indicators["close"]
+
         macd = analysis.indicators.get("MACD.macd", 0)
         macd_signal = analysis.indicators.get("MACD.signal", 0)
 
-        trend = "UP" if price > ema50 else "DOWN"
+        # 🔥 TREND CONFIRMATION (EMA STACKING)
+        if price > ema20 > ema50:
+            trend = "STRONG_UP"
+        elif price < ema20 < ema50:
+            trend = "STRONG_DOWN"
+        else:
+            trend = "WEAK"
 
-        # 🔥 Momentum Strength
-        distance = abs(price - ema50)
-        strength_threshold = price * 0.0006  # slightly stricter
-        strong_momentum = distance > strength_threshold
+        # 🔥 MOMENTUM CHECK
+        bullish_momentum = macd > macd_signal
+        bearish_momentum = macd < macd_signal
 
-        # 🔥 MACD Strength (NEW)
-        macd_strength = abs(macd - macd_signal)
-        strong_macd = macd_strength > 0.00005
+        # 🔥 RSI SNIPER ZONES
+        buy_zone = 50 < rsi < 62
+        sell_zone = 38 < rsi < 50
 
-        if trend == "UP":
-            if 50 < rsi < 65 and macd > macd_signal and strong_momentum and strong_macd:
+        # 🔥 ENTRY LOGIC (UPGRADED)
+        if trend == "STRONG_UP" and buy_zone and bullish_momentum:
+            if rsi < 58:
                 result = f"🔥 STRONG BUY\n🟢 BUY @ {round(price,5)}"
-            elif 48 < rsi < 68 and macd > macd_signal and strong_macd:
-                result = f"⚡ QUICK BUY\n🟢 BUY @ {round(price,5)}"
             else:
-                return "⏳ No clean setup"
+                result = f"⚡ QUICK BUY\n🟢 BUY @ {round(price,5)}"
+
+        elif trend == "STRONG_DOWN" and sell_zone and bearish_momentum:
+            if rsi > 42:
+                result = f"🔥 STRONG SELL\n🔴 SELL @ {round(price,5)}"
+            else:
+                result = f"⚡ QUICK SELL\n🔴 SELL @ {round(price,5)}"
 
         else:
-            if 35 < rsi < 50 and macd < macd_signal and strong_momentum and strong_macd:
-                result = f"🔥 STRONG SELL\n🔴 SELL @ {round(price,5)}"
-            elif 32 < rsi < 52 and macd < macd_signal and strong_macd:
-                result = f"⚡ QUICK SELL\n🔴 SELL @ {round(price,5)}"
-            else:
-                return "⏳ No clean setup"
+            return "⏳ No clean setup"
 
         expiration = {
             "1m": "2-3 minutes",
@@ -203,7 +210,7 @@ def generate_signal(pair, timeframe):
         timing = get_entry_timing(timeframe)
 
         return f"""
-📊 Sigma AI SMART MODE v4
+📊 Sigma AI SNIPER MODE v5
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -211,7 +218,7 @@ def generate_signal(pair, timeframe):
 {result}
 {timing}
 
-🎯 Mode: BALANCED (Accuracy ↑ / Signals Slightly ↓)
+🎯 Mode: SNIPER (Accuracy ↑↑ / Clean Entries Only)
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
@@ -219,12 +226,9 @@ def generate_signal(pair, timeframe):
 ⏳ Expiration: {expiration}
 
 📊 RSI: {round(rsi,2)}
-📊 Trend: {trend}
-📊 MACD: {'Bullish' if macd > macd_signal else 'Bearish'}
-📊 Strength: {'Strong' if strong_momentum else 'Weak'}
-📊 MACD Power: {'Strong' if strong_macd else 'Weak'}
+📊 EMA20/50: {'Bullish Stack' if trend=='STRONG_UP' else 'Bearish Stack' if trend=='STRONG_DOWN' else 'Weak'}
+📊 MACD: {'Bullish' if bullish_momentum else 'Bearish'}
 """
-
     except Exception as e:
         print(e)
         return "❌ Error"
@@ -233,7 +237,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
         return
-    await update.message.reply_text("🚀 Bot Started (BALANCED MODE)", reply_markup=main_menu())
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 START BOT", callback_data="start_bot")]
+    ])
+
+    await update.message.reply_text(
+        "🤖 Welcome to Sigma AI Bot\n\nClick below to start:",
+        reply_markup=keyboard
+    )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text.lower() in ["start bot", "🚀 start bot"]:
@@ -251,6 +263,9 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reset_martingale()
         await query.edit_message_text(f"✅ WIN\n\nWins: {WIN}\nLoss: {LOSS}")
 
+    elif data == "start_bot":
+    await query.edit_message_text("🚀 Bot Started", reply_markup=main_menu())
+    
     elif data == "result_loss":
         LOSS += 1
         increase_martingale()
