@@ -154,10 +154,12 @@ def generate_signal(pair, timeframe):
             "15m": Interval.INTERVAL_15_MINUTES
         }
 
+        # 🔥 SESSION FILTER
         hour = datetime.datetime.utcnow().hour
         if not (7 <= hour <= 22):
             return "⛔ Trade only London/New York session"
 
+        # === MAIN TF ===
         analysis = get_analysis(pair, interval_map[timeframe])
 
         rsi = analysis.indicators["RSI"]
@@ -166,33 +168,65 @@ def generate_signal(pair, timeframe):
         macd = analysis.indicators.get("MACD.macd", 0)
         macd_signal = analysis.indicators.get("MACD.signal", 0)
 
+        # === HIGHER TF (MTF CONFIRMATION) ===
+        higher_tf = Interval.INTERVAL_5_MINUTES if timeframe == "1m" else Interval.INTERVAL_15_MINUTES
+        ht_analysis = get_analysis(pair, higher_tf)
+
+        ht_price = ht_analysis.indicators["close"]
+        ht_ema = ht_analysis.indicators["EMA50"]
+
         trend = "UP" if price > ema50 else "DOWN"
+        ht_trend = "UP" if ht_price > ht_ema else "DOWN"
 
-        # 🔥 Momentum Strength
+        # 🔥 EMA SLOPE (ACCURACY BOOST)
+        ema_prev = analysis.indicators.get("EMA50[1]", ema50)
+        ema_slope_up = ema50 > ema_prev
+        ema_slope_down = ema50 < ema_prev
+
+        # 🔥 RSI DIRECTION (ACCURACY BOOST)
+        rsi_prev = analysis.indicators.get("RSI[1]", rsi)
+        rsi_up = rsi > rsi_prev
+        rsi_down = rsi < rsi_prev
+
+        # 🔥 MOMENTUM (RELAXED = MORE SIGNALS)
         distance = abs(price - ema50)
-        strength_threshold = price * 0.0006  # slightly stricter
-        strong_momentum = distance > strength_threshold
+        strong_momentum = distance > price * 0.0005
 
-        # 🔥 MACD Strength (NEW)
+        # 🔥 MACD (RELAXED)
         macd_strength = abs(macd - macd_signal)
-        strong_macd = macd_strength > 0.00005
+        strong_macd = macd_strength > 0.00003
 
-        if trend == "UP":
-            if 50 < rsi < 65 and macd > macd_signal and strong_momentum and strong_macd:
+        # 🔥 PULLBACK ENTRY (MORE SIGNALS)
+        pullback_buy = price > ema50 and rsi < 60
+        pullback_sell = price < ema50 and rsi > 40
+
+        # === SIGNAL LOGIC ===
+        if trend == "UP" and ht_trend == "UP" and ema_slope_up:
+
+            if 52 < rsi < 68 and rsi_up and macd > macd_signal:
                 result = f"🔥 STRONG BUY\n🟢 BUY @ {round(price,5)}"
-            elif 48 < rsi < 68 and macd > macd_signal and strong_macd:
-                result = f"⚡ QUICK BUY\n🟢 BUY @ {round(price,5)}"
+
+            elif pullback_buy and rsi_up and macd > macd_signal:
+                result = f"⚡ QUICK BUY (Pullback)\n🟢 BUY @ {round(price,5)}"
+
+            else:
+                return "⏳ No clean setup"
+
+        elif trend == "DOWN" and ht_trend == "DOWN" and ema_slope_down:
+
+            if 32 < rsi < 48 and rsi_down and macd < macd_signal:
+                result = f"🔥 STRONG SELL\n🔴 SELL @ {round(price,5)}"
+
+            elif pullback_sell and rsi_down and macd < macd_signal:
+                result = f"⚡ QUICK SELL (Pullback)\n🔴 SELL @ {round(price,5)}"
+
             else:
                 return "⏳ No clean setup"
 
         else:
-            if 35 < rsi < 50 and macd < macd_signal and strong_momentum and strong_macd:
-                result = f"🔥 STRONG SELL\n🔴 SELL @ {round(price,5)}"
-            elif 32 < rsi < 52 and macd < macd_signal and strong_macd:
-                result = f"⚡ QUICK SELL\n🔴 SELL @ {round(price,5)}"
-            else:
-                return "⏳ No clean setup"
+            return "⏳ Trend conflict (MTF filter)"
 
+        # === EXPIRATION ===
         expiration = {
             "1m": "2-3 minutes",
             "5m": "5-10 minutes",
@@ -203,7 +237,7 @@ def generate_signal(pair, timeframe):
         timing = get_entry_timing(timeframe)
 
         return f"""
-📊 Sigma AI SMART MODE v4
+📊 Sigma AI SMART MODE v5.5
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -211,7 +245,7 @@ def generate_signal(pair, timeframe):
 {result}
 {timing}
 
-🎯 Mode: BALANCED (Accuracy ↑ / Signals Slightly ↓)
+🎯 Mode: ACCURACY BOOST (Smart + Frequent Signals)
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
@@ -219,10 +253,10 @@ def generate_signal(pair, timeframe):
 ⏳ Expiration: {expiration}
 
 📊 RSI: {round(rsi,2)}
-📊 Trend: {trend}
+📊 Trend: {trend} / HTF: {ht_trend}
+📊 EMA Slope: {'Up' if ema_slope_up else 'Down'}
 📊 MACD: {'Bullish' if macd > macd_signal else 'Bearish'}
-📊 Strength: {'Strong' if strong_momentum else 'Weak'}
-📊 MACD Power: {'Strong' if strong_macd else 'Weak'}
+📊 Momentum: {'Strong' if strong_momentum else 'Weak'}
 """
 
     except Exception as e:
