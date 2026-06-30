@@ -264,7 +264,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"✅ WIN\n\nWins: {WIN}\nLoss: {LOSS}")
 
     elif data == "start_bot":
-    await query.edit_message_text("🚀 Bot Started", reply_markup=main_menu())
+        await query.edit_message_text("🚀 Bot Started", reply_markup=main_menu())
     
     elif data == "result_loss":
         LOSS += 1
