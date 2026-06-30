@@ -158,115 +158,68 @@ def generate_signal(pair, timeframe):
         if not (7 <= hour <= 22):
             return "⛔ Trade only London/New York session"
 
-        # ===== MAIN TF =====
         analysis = get_analysis(pair, interval_map[timeframe])
 
-        # ===== HIGHER TF (MTF CONFIRMATION) =====
-        higher_tf = "5m" if timeframe == "1m" else "15m"
-        analysis_htf = get_analysis(pair, interval_map[higher_tf])
-
-        # ===== INDICATORS =====
         rsi = analysis.indicators["RSI"]
         ema50 = analysis.indicators["EMA50"]
         price = analysis.indicators["close"]
-
         macd = analysis.indicators.get("MACD.macd", 0)
         macd_signal = analysis.indicators.get("MACD.signal", 0)
 
-        # ===== HIGHER TF TREND =====
-        htf_price = analysis_htf.indicators["close"]
-        htf_ema50 = analysis_htf.indicators["EMA50"]
-        htf_trend = "UP" if htf_price > htf_ema50 else "DOWN"
-
         trend = "UP" if price > ema50 else "DOWN"
 
-        # ❗ MTF FILTER
-        if trend != htf_trend:
-            return "⛔ MTF Conflict (1m vs 5m)"
-
+        # 🔥 Momentum Strength
         distance = abs(price - ema50)
+        strength_threshold = price * 0.00075
+        strong_momentum = distance > strength_threshold
 
-        # ===== RSI =====
+        # 🔥 MACD Strength
+        macd_strength = abs(macd - macd_signal)
+        strong_macd = macd_strength > 0.00007
+
+        # 🔥 Trend Quality
+        clean_trend = (distance / price) > 0.00045
+
+        # 🔥 Entry Position (avoid late entries)
+        entry_ok = distance < (price * 0.0018)
+
+        # 🔥 NEW: RSI Momentum Direction
         rsi_prev = analysis.indicators.get("RSI[1]", rsi)
         rsi_up = rsi > rsi_prev
         rsi_down = rsi < rsi_prev
 
-        # ===== MACD =====
-        macd_strength = abs(macd - macd_signal)
-        macd_aligned = (macd > 0 and trend == "UP") or (macd < 0 and trend == "DOWN")
-
-        # ===== STABILITY =====
-        price_prev = analysis.indicators.get("close[1]", price)
-        candle_move = abs(price - price_prev)
-        stable_market = candle_move < (price * 0.0015)
-
-        clean_trend = (distance / price) > 0.0005
-
-        # =========================================
-        # 🔥 SUPPORT / RESISTANCE (BASIC ZONE)
-        # =========================================
-
-        high = analysis.indicators.get("high", price)
-        low = analysis.indicators.get("low", price)
-
-        resistance_zone = high * 0.999
-        support_zone = low * 1.001
-
-        near_resistance = price >= resistance_zone
-        near_support = price <= support_zone
-
-        # =========================================
-        # 🔥 SNIPER MODE
-        # =========================================
-
-        strong_momentum = distance > (price * 0.0008)
-        strong_macd = macd_strength > 0.00008
-        entry_ok = distance < (price * 0.0016)
-        pullback_ok = distance < (price * 0.0011)
+        # 🔥 NEW: Pullback Filter
+        pullback_ok = distance < (price * 0.0012)
 
         if trend == "UP":
-            if near_resistance:
-                return "🚫 Near Resistance - Skip"
+            if (53 < rsi < 62 and rsi_up
+                and macd > macd_signal
+                and strong_momentum and strong_macd
+                and clean_trend and entry_ok and pullback_ok):
 
-            if (53 < rsi < 61 and rsi_up
-                and macd > macd_signal and strong_macd and macd_aligned
-                and strong_momentum and clean_trend
-                and entry_ok and pullback_ok
-                and stable_market):
-
-                signal_type = "🔥 STRONG BUY (SNIPER)"
-                action = f"🟢 BUY @ {round(price,5)}"
+                result = f"🔥 STRONG BUY\n🟢 BUY @ {round(price,5)}"
 
             elif (50 < rsi < 65 and rsi_up
                   and macd > macd_signal
-                  and macd_strength > 0.00006
-                  and clean_trend):
+                  and strong_macd and clean_trend):
 
-                signal_type = "⚡ QUICK BUY"
-                action = f"🟢 BUY @ {round(price,5)}"
+                result = f"⚡ QUICK BUY\n🟢 BUY @ {round(price,5)}"
             else:
                 return "⏳ No clean setup"
 
         else:
-            if near_support:
-                return "🚫 Near Support - Skip"
+            if (38 < rsi < 47 and rsi_down
+                and macd < macd_signal
+                and strong_momentum and strong_macd
+                and clean_trend and entry_ok and pullback_ok):
 
-            if (39 < rsi < 47 and rsi_down
-                and macd < macd_signal and strong_macd and macd_aligned
-                and strong_momentum and clean_trend
-                and entry_ok and pullback_ok
-                and stable_market):
-
-                signal_type = "🔥 STRONG SELL (SNIPER)"
-                action = f"🔴 SELL @ {round(price,5)}"
+                result = f"🔥 STRONG SELL\n🔴 SELL @ {round(price,5)}"
 
             elif (35 < rsi < 50 and rsi_down
                   and macd < macd_signal
-                  and macd_strength > 0.00006
-                  and clean_trend):
+                  and strong_macd and clean_trend):
 
-                signal_type = "⚡ QUICK SELL"
-                action = f"🔴 SELL @ {round(price,5)}"
+                result = f"⚡ QUICK SELL\n🔴 SELL @ {round(price,5)}"
             else:
                 return "⏳ No clean setup"
 
@@ -280,32 +233,32 @@ def generate_signal(pair, timeframe):
         timing = get_entry_timing(timeframe)
 
         return f"""
-📊 Sigma AI SNIPER PRO v8
+📊 Sigma AI SMART MODE v6
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
-📊 HTF Confirm: {higher_tf}
 
-{signal_type}
-{action}
+{result}
 {timing}
 
-🎯 Mode: MTF + S/R Sniper
+🎯 Mode: PRECISION FILTERED
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
 
 ⏳ Expiration: {expiration}
 
-📊 Trend: {trend} (HTF: {htf_trend})
 📊 RSI: {round(rsi,2)}
+📊 RSI Direction: {'Up' if rsi_up else 'Down'}
+📊 Trend: {trend}
 📊 MACD: {'Bullish' if macd > macd_signal else 'Bearish'}
-📊 Market: {'Stable' if stable_market else 'Volatile'}
+📊 Trend Quality: {'Clean' if clean_trend else 'Choppy'}
 """
+
     except Exception as e:
         print(e)
         return "❌ Error"
-        
+               
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
