@@ -89,12 +89,13 @@ def result_buttons():
     ])
 
 PAIRS = [
-    "EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD",
-    "EURJPY","GBPJPY","AUDJPY","CADJPY","CHFJPY",
-    "EURGBP","EURCHF","EURAUD","EURCAD",
-    "GBPAUD","GBPCAD","GBPCHF",
-    "AUDCAD","AUDCHF","CADCHF"
-]
+    "EURUSD",
+    "GBPUSD",
+    "EURGBP",
+    "GBPJPY",
+    "USDJPY",
+    "XAUUSD"
+    ]
 
 CRYPTO_PAIRS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]
 
