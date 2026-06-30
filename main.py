@@ -5,11 +5,10 @@ from tradingview_ta import TA_Handler, Interval
 import datetime
 import os
 
-# ================= CONFIG =================
 TOKEN = os.getenv("TOKEN")
 ALLOWED_USERS = [6351041498]
 
-# ================= TRACKING =================
+# === TRACKING SYSTEM ===
 WIN = 0
 LOSS = 0
 MARTINGALE_STEP = 0
@@ -28,13 +27,44 @@ def increase_martingale():
     global MARTINGALE_STEP
     MARTINGALE_STEP += 1
 
-# ================= PAIRS =================
-PAIRS = [
-    "EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF",
-    "EURJPY","GBPJPY"
-]
+# === ENTRY TIMING ===
+def get_entry_timing(timeframe):
+    now = datetime.datetime.utcnow()
 
-# ================= ANALYSIS =================
+    if timeframe == "5m":
+        total_seconds = 300
+        seconds_passed = (now.minute % 5) * 60 + now.second
+    elif timeframe == "15m":
+        total_seconds = 900
+        seconds_passed = (now.minute % 15) * 60 + now.second
+
+    remaining = total_seconds - seconds_passed
+
+    if remaining > total_seconds * 0.5:
+        return f"⏳ WAIT ({remaining}s)"
+    else:
+        return f"🚀 ENTRY ({remaining}s)"
+
+# === SESSION FILTER ===
+def get_trading_session():
+    hour = datetime.datetime.utcnow().hour
+
+    if 7 <= hour < 13:
+        return "London"
+    elif 13 <= hour < 17:
+        return "Overlap"
+    elif 17 <= hour < 22:
+        return "NewYork"
+    return None
+
+# === PAIRS ===
+PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "GBPJPY", "EURGBP", "XAUUSD"]
+
+TIMEFRAMES = ["5m", "15m"]  # HIGH ACCURACY MODE
+
+LAST_SIGNAL = {}
+
+# === ANALYSIS ===
 def get_analysis(symbol, interval):
     handler = TA_Handler(
         symbol=symbol,
@@ -44,139 +74,110 @@ def get_analysis(symbol, interval):
     )
     return handler.get_analysis()
 
-# ================= CANDLE LOGIC =================
-def detect_engulfing(open_p, close_p, prev_open, prev_close):
-    return (close_p > open_p and prev_close < prev_open) or \
-           (close_p < open_p and prev_close > prev_open)
-
-def rejection_wick(open_p, close_p, high, low):
-    body = abs(close_p - open_p)
-    upper_wick = high - max(open_p, close_p)
-    lower_wick = min(open_p, close_p) - low
-    return upper_wick > body * 2 or lower_wick > body * 2
-
-# ================= SIGNAL ENGINE =================
-
-def generate_signal(pair):
+# === SIGNAL LOGIC (UPGRADED ACCURACY) ===
+def generate_signal(pair, tf):
     try:
-        hour = datetime.datetime.utcnow().hour
-        if not (7 <= hour <= 22):
+        if not get_trading_session():
             return None
 
-        tf1 = get_analysis(pair, Interval.INTERVAL_1_MINUTE)
-        tf5 = get_analysis(pair, Interval.INTERVAL_5_MINUTES)
-        tf15 = get_analysis(pair, Interval.INTERVAL_15_MINUTES)
+        interval_map = {
+            "5m": Interval.INTERVAL_5_MINUTES,
+            "15m": Interval.INTERVAL_15_MINUTES
+        }
 
-        price = tf1.indicators["close"]
+        analysis = get_analysis(pair, interval_map[tf])
 
-        rsi1 = tf1.indicators["RSI"]
-        ema1 = tf1.indicators["EMA50"]
-        ema5 = tf5.indicators["EMA50"]
-        ema15 = tf15.indicators["EMA50"]
+        rsi = analysis.indicators["RSI"]
+        ema50 = analysis.indicators["EMA50"]
+        price = analysis.indicators["close"]
+        macd = analysis.indicators.get("MACD.macd", 0)
+        macd_signal = analysis.indicators.get("MACD.signal", 0)
 
-        high = tf1.indicators["high"]
-        low = tf1.indicators["low"]
-        open_price = tf1.indicators["open"]
+        trend = "UP" if price > ema50 else "DOWN"
 
-        # 🔥 RELAXED TREND (2/3 confirmation)
-        trend1 = "UP" if price > ema1 else "DOWN"
-        trend5 = "UP" if price > ema5 else "DOWN"
-        trend15 = "UP" if price > ema15 else "DOWN"
+        # STRONGER FILTERS
+        distance = abs(price - ema50)
+        strong_trend = distance > price * 0.0007
 
-        trend_votes = [trend1, trend5, trend15]
-        if trend_votes.count("UP") >= 2:
-            trend = "UP"
-        elif trend_votes.count("DOWN") >= 2:
-            trend = "DOWN"
+        macd_power = abs(macd - macd_signal)
+        strong_macd = macd_power > 0.00007
+
+        if trend == "UP":
+            if 52 < rsi < 65 and macd > macd_signal and strong_trend and strong_macd:
+                signal = "🔥 STRONG BUY"
+            else:
+                return None
+
         else:
-            return None
+            if 35 < rsi < 48 and macd < macd_signal and strong_trend and strong_macd:
+                signal = "🔥 STRONG SELL"
+            else:
+                return None
 
-        # 🔥 LESS STRICT VOLATILITY
-        if (high - low) / price < 0.0005:
-            return None
-
-        # 🔥 SOFTER RSI
-        if trend == "UP" and rsi1 < 45:
-            return None
-        if trend == "DOWN" and rsi1 > 55:
-            return None
-
-        # 🔥 WIDER ZONES
-        support = low
-        resistance = high
-
-        near_support = abs(price - support) / price < 0.0025
-        near_resistance = abs(price - resistance) / price < 0.0025
-
-        # 🔥 CANDLE (BONUS ONLY)
-        engulf = detect_engulfing(open_price, price, open_price, price)
-        wick = rejection_wick(open_price, price, high, low)
-
-        if trend == "UP" and near_support:
-            signal = "BUY"
-
-        elif trend == "DOWN" and near_resistance:
-            signal = "SELL"
-
-        if not signal:
-            return None
-
-        # 🔥 SMART CONFIDENCE
-        confidence = 3
-        if trend1 == trend5 == trend15:
-            confidence += 1
-        if engulf:
-            confidence += 1
-        if wick:
-            confidence += 1
-
-        direction = "🟢 BUY" if signal == "BUY" else "🔴 SELL"
+        timing = get_entry_timing(tf)
         amount = get_trade_amount()
 
+        expiration = "5-10 min" if tf == "5m" else "15-30 min"
+
         return f"""
-🚀 AUTO SNIPER SIGNAL
+📊 AUTO SNIPER MODE (HIGH ACCURACY)
 
-💱 Pair: {pair}
-📊 Direction: {direction}
-🔥 Confidence: {confidence}/6
+💱 {pair}
+⏱ TF: {tf}
 
-⏱ Entry: 1m
-📈 Confirm: 5m + 15m
-⏳ Expiration: 2-5 min
+{signal}
+{timing}
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
+
+⏳ Expiration: {expiration}
+
+📊 RSI: {round(rsi,2)}
+📊 Trend: {trend}
+📊 MACD: {'Bullish' if macd > macd_signal else 'Bearish'}
+📊 Strength: {'Strong' if strong_trend else 'Weak'}
 """
 
-    except Exception as e:
-    print(f"Error in {pair}: {e}")
+    except:
         return None
-        
-# ================= AUTO SIGNAL LOOP =================
-async def auto_signal(context: ContextTypes.DEFAULT_TYPE):
+
+# === AUTO LOOP ===
+async def auto_signal_loop(context: ContextTypes.DEFAULT_TYPE):
+    global LAST_SIGNAL
+
     for pair in PAIRS:
-        signal = generate_signal(pair)
+        for tf in TIMEFRAMES:
+            key = f"{pair}_{tf}"
 
-        if signal:
-            for user_id in ALLOWED_USERS:
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text=signal
-                )
+            signal = generate_signal(pair, tf)
 
-# ================= START COMMAND =================
+            if signal:
+                if LAST_SIGNAL.get(key) == signal:
+                    continue
+
+                LAST_SIGNAL[key] = signal
+
+                for user in ALLOWED_USERS:
+                    await context.bot.send_message(chat_id=user, text=signal)
+
+# === START ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
         return
-    await update.message.reply_text("🚀 AUTO BOT ACTIVATED")
 
-# ================= MAIN =================
+    await update.message.reply_text(
+        "🤖 AUTO BOT RUNNING (5m & 15m High Accuracy)\nNo manual clicking needed."
+    )
+
+# === APP ===
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 
-# RUN AUTO EVERY 60s
-app.job_queue.run_repeating(auto_signal, interval=60, first=10)
+# AUTO SCAN EVERY 60s
+app.job_queue.run_repeating(auto_signal_loop, interval=60, first=10)
 
 app.run_polling()
+        
