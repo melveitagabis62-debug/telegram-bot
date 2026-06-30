@@ -167,58 +167,69 @@ def generate_signal(pair, timeframe):
 
         trend = "UP" if price > ema50 else "DOWN"
 
-        # 🔥 Momentum Strength
         distance = abs(price - ema50)
-        strength_threshold = price * 0.00075
-        strong_momentum = distance > strength_threshold
 
-        # 🔥 MACD Strength
-        macd_strength = abs(macd - macd_signal)
-        strong_macd = macd_strength > 0.00007
-
-        # 🔥 Trend Quality
-        clean_trend = (distance / price) > 0.00045
-
-        # 🔥 Entry Position (avoid late entries)
-        entry_ok = distance < (price * 0.0018)
-
-        # 🔥 NEW: RSI Momentum Direction
+        # ===== COMMON FILTERS =====
         rsi_prev = analysis.indicators.get("RSI[1]", rsi)
         rsi_up = rsi > rsi_prev
         rsi_down = rsi < rsi_prev
 
-        # 🔥 NEW: Pullback Filter
-        pullback_ok = distance < (price * 0.0012)
+        macd_strength = abs(macd - macd_signal)
+        macd_aligned = (macd > 0 and trend == "UP") or (macd < 0 and trend == "DOWN")
+
+        price_prev = analysis.indicators.get("close[1]", price)
+        candle_move = abs(price - price_prev)
+        stable_market = candle_move < (price * 0.0015)
+
+        clean_trend = (distance / price) > 0.0005
+
+        # =========================================
+        # 🔥 SNIPER MODE (STRICT - HIGH ACCURACY)
+        # =========================================
+
+        strong_momentum_sniper = distance > (price * 0.0008)
+        strong_macd_sniper = macd_strength > 0.00008
+        entry_ok_sniper = distance < (price * 0.0016)
+        pullback_ok_sniper = distance < (price * 0.0011)
 
         if trend == "UP":
-            if (53 < rsi < 62 and rsi_up
-                and macd > macd_signal
-                and strong_momentum and strong_macd
-                and clean_trend and entry_ok and pullback_ok):
+            if (53 < rsi < 61 and rsi_up
+                and macd > macd_signal and strong_macd_sniper and macd_aligned
+                and strong_momentum_sniper and clean_trend
+                and entry_ok_sniper and pullback_ok_sniper and stable_market):
 
-                result = f"🔥 STRONG BUY\n🟢 BUY @ {round(price,5)}"
+                signal_type = "🔥 STRONG BUY (SNIPER)"
+                action = f"🟢 BUY @ {round(price,5)}"
 
+            # =========================================
+            # ⚡ QUICK MODE (RELAXED - MORE SIGNALS)
+            # =========================================
             elif (50 < rsi < 65 and rsi_up
                   and macd > macd_signal
-                  and strong_macd and clean_trend):
+                  and macd_strength > 0.00006
+                  and clean_trend):
 
-                result = f"⚡ QUICK BUY\n🟢 BUY @ {round(price,5)}"
+                signal_type = "⚡ QUICK BUY (BALANCED)"
+                action = f"🟢 BUY @ {round(price,5)}"
             else:
                 return "⏳ No clean setup"
 
         else:
-            if (38 < rsi < 47 and rsi_down
-                and macd < macd_signal
-                and strong_momentum and strong_macd
-                and clean_trend and entry_ok and pullback_ok):
+            if (39 < rsi < 47 and rsi_down
+                and macd < macd_signal and strong_macd_sniper and macd_aligned
+                and strong_momentum_sniper and clean_trend
+                and entry_ok_sniper and pullback_ok_sniper and stable_market):
 
-                result = f"🔥 STRONG SELL\n🔴 SELL @ {round(price,5)}"
+                signal_type = "🔥 STRONG SELL (SNIPER)"
+                action = f"🔴 SELL @ {round(price,5)}"
 
             elif (35 < rsi < 50 and rsi_down
                   and macd < macd_signal
-                  and strong_macd and clean_trend):
+                  and macd_strength > 0.00006
+                  and clean_trend):
 
-                result = f"⚡ QUICK SELL\n🔴 SELL @ {round(price,5)}"
+                signal_type = "⚡ QUICK SELL (BALANCED)"
+                action = f"🔴 SELL @ {round(price,5)}"
             else:
                 return "⏳ No clean setup"
 
@@ -232,15 +243,16 @@ def generate_signal(pair, timeframe):
         timing = get_entry_timing(timeframe)
 
         return f"""
-📊 Sigma AI SMART MODE v6
+📊 Sigma AI HYBRID SNIPER MODE
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
 
-{result}
+{signal_type}
+{action}
 {timing}
 
-🎯 Mode: PRECISION FILTERED
+🎯 Mode: Hybrid (Sniper + Balanced)
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
@@ -248,12 +260,11 @@ def generate_signal(pair, timeframe):
 ⏳ Expiration: {expiration}
 
 📊 RSI: {round(rsi,2)}
-📊 RSI Direction: {'Up' if rsi_up else 'Down'}
+📊 RSI Dir: {'Up' if rsi_up else 'Down'}
 📊 Trend: {trend}
 📊 MACD: {'Bullish' if macd > macd_signal else 'Bearish'}
-📊 Trend Quality: {'Clean' if clean_trend else 'Choppy'}
+📊 Market: {'Stable' if stable_market else 'Volatile'}
 """
-
     except Exception as e:
         print(e)
         return "❌ Error"
