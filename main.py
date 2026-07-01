@@ -122,7 +122,7 @@ def generate_signal(pair, tf):
         and strong_trend
         and pullback_buy
         ):
-        signal = "🔥 STRONG BUY"
+            signal = "🔥 STRONG BUY"
   else:
         return None
 
