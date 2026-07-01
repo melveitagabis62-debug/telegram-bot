@@ -94,7 +94,8 @@ PAIRS = [
     "EURGBP",
     "GBPJPY",
     "USDJPY",
-    "XAUUSD"
+    "AUDCAD",
+    "USDCAD"
     ]
 
 CRYPTO_PAIRS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]
@@ -159,75 +160,91 @@ def generate_signal(pair, timeframe):
             return "⛔ Trade only London/New York session"
 
         analysis = get_analysis(pair, interval_map[timeframe])
+        ind = analysis.indicators
 
-        rsi = analysis.indicators["RSI"]
-        ema50 = analysis.indicators["EMA50"]
-        price = analysis.indicators["close"]
-        macd = analysis.indicators.get("MACD.macd", 0)
-        macd_signal = analysis.indicators.get("MACD.signal", 0)
+        # === PRICE DATA ===
+        o = ind["open"]
+        h = ind["high"]
+        l = ind["low"]
+        c = ind["close"]
+        body = abs(c - o)
+        candle_range = h - l if h > l else 0.00001
+        upper_shadow = h - max(o, c)
+        lower_shadow = min(o, c) - l
 
-        trend = "UP" if price > ema50 else "DOWN"
+        # === INDICATORS ===
+        rsi = ind["RSI"]
+        ema50 = ind["EMA50"]
+        macd = ind.get("MACD.macd", 0)
+        macd_signal = ind.get("MACD.signal", 0)
+        trend = "UP" if c > ema50 else "DOWN"
 
-        # 🔥 Momentum Strength
-        distance = abs(price - ema50)
-        strength_threshold = price * 0.0006  # slightly stricter
-        strong_momentum = distance > strength_threshold
+        # === CANDLESTICK ANALYSIS ===
+        is_bullish_candle = c > o
+        body_ratio = body / candle_range
+        lower_shadow_ratio = lower_shadow / candle_range
+        upper_shadow_ratio = upper_shadow / candle_range
 
-        # 🔥 MACD Strength (NEW)
-        macd_strength = abs(macd - macd_signal)
-        strong_macd = macd_strength > 0.00005
+        candle_signal = None
 
-        if trend == "UP":
-            if 50 < rsi < 65 and macd > macd_signal and strong_momentum and strong_macd:
-                result = f"🔥 STRONG BUY\n🟢 BUY @ {round(price,5)}"
-            elif 48 < rsi < 68 and macd > macd_signal and strong_macd:
-                result = f"⚡ QUICK BUY\n🟢 BUY @ {round(price,5)}"
+        # Strong patterns
+        if body_ratio > 0.65 and is_bullish_candle and lower_shadow_ratio < 0.2:
+            candle_signal = "STRONG_BULLISH"
+        elif body_ratio > 0.65 and not is_bullish_candle and upper_shadow_ratio < 0.2:
+            candle_signal = "STRONG_BEARISH"
+        elif lower_shadow_ratio > 2.0 and body_ratio < 0.3:   # Hammer / Inverted Hammer
+            candle_signal = "BULLISH_REVERSAL" if trend == "DOWN" else "BULLISH_CONT"
+        elif upper_shadow_ratio > 2.0 and body_ratio < 0.3:
+            candle_signal = "BEARISH_REVERSAL" if trend == "UP" else "BEARISH_CONT"
+
+        # === HYBRID SIGNAL LOGIC ===
+        result = None
+
+        if candle_signal in ["STRONG_BULLISH", "BULLISH_REVERSAL", "BULLISH_CONT"]:
+            if 40 < rsi < 68 and c > ema50 and macd > macd_signal:
+                result = f"🔥 HYBRID STRONG BUY\n🟢 BUY @ {round(c,5)}"
+
+        elif candle_signal in ["STRONG_BEARISH", "BEARISH_REVERSAL", "BEARISH_CONT"]:
+            if 32 < rsi < 60 and c < ema50 and macd < macd_signal:
+                result = f"🔥 HYBRID STRONG SELL\n🔴 SELL @ {round(c,5)}"
+
+        if not result:
+            # Fallback to lighter signals to maintain frequency
+            if 48 < rsi < 65 and macd > macd_signal and c > ema50 and body_ratio > 0.4:
+                result = f"⚡ QUICK BUY\n🟢 BUY @ {round(c,5)}"
+            elif 35 < rsi < 52 and macd < macd_signal and c < ema50 and body_ratio > 0.4:
+                result = f"⚡ QUICK SELL\n🔴 SELL @ {round(c,5)}"
             else:
-                return "⏳ No clean setup"
+                return "⏳ No clean hybrid setup"
 
-        else:
-            if 35 < rsi < 50 and macd < macd_signal and strong_momentum and strong_macd:
-                result = f"🔥 STRONG SELL\n🔴 SELL @ {round(price,5)}"
-            elif 32 < rsi < 52 and macd < macd_signal and strong_macd:
-                result = f"⚡ QUICK SELL\n🔴 SELL @ {round(price,5)}"
-            else:
-                return "⏳ No clean setup"
-
-        expiration = {
-            "1m": "2-3 minutes",
-            "5m": "5-10 minutes",
-            "15m": "15-30 minutes"
-        }[timeframe]
-
-        amount = get_trade_amount()
+        expiration = {"1m": "2-3 minutes", "5m": "5-10 minutes", "15m": "15-30 minutes"}[timeframe]
         timing = get_entry_timing(timeframe)
+        amount = get_trade_amount()
 
         return f"""
-📊 Sigma AI SMART MODE v4
+📊 Sigma AI HYBRID MODE v4
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
 
 {result}
+
 {timing}
 
-🎯 Mode: BALANCED (Accuracy ↑ / Signals Slightly ↓)
+🎯 Mode: Hybrid (Candle + Indicators) - Balanced Frequency
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
 
 ⏳ Expiration: {expiration}
 
-📊 RSI: {round(rsi,2)}
-📊 Trend: {trend}
-📊 MACD: {'Bullish' if macd > macd_signal else 'Bearish'}
-📊 Strength: {'Strong' if strong_momentum else 'Weak'}
-📊 MACD Power: {'Strong' if strong_macd else 'Weak'}
-"""
+📊 RSI: {round(rsi,2)} | Trend: {trend}
+📊 Candle: {'Strong Body' if body_ratio > 0.6 else 'With Shadow'}
+        """
 
     except Exception as e:
         print(e)
-        return "❌ Error"
+        return "❌ Error generating signal"
 
                
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
