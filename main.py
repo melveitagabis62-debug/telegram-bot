@@ -1,20 +1,30 @@
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-
 from tradingview_ta import TA_Handler, Interval
 import datetime
 import os
+import logging
+import asyncio
 
+# === CONFIG ===
 TOKEN = os.getenv("TOKEN")
-ALLOWED_USERS = [6351041498]
+ALLOWED_USERS = [int(uid) for uid in os.getenv("ALLOWED_USERS", "6351041498").split(",")]
+BASE_AMOUNT = float(os.getenv("BASE_AMOUNT", 1.0))
+MARTINGALE_ENABLED = os.getenv("MARTINGALE_ENABLED", "True").lower() == "true"
 
-# === TRACKING SYSTEM ===
+# Logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# === TRACKING ===
 WIN = 0
 LOSS = 0
 MARTINGALE_STEP = 0
-MARTINGALE_ENABLED = True
 
-def get_trade_amount(base=1):
+def get_trade_amount(base=BASE_AMOUNT):
     if not MARTINGALE_ENABLED:
         return base
     return base * (2 ** MARTINGALE_STEP)
@@ -22,47 +32,37 @@ def get_trade_amount(base=1):
 def reset_martingale():
     global MARTINGALE_STEP
     MARTINGALE_STEP = 0
+    logger.info("Martingale reset")
 
 def increase_martingale():
     global MARTINGALE_STEP
     MARTINGALE_STEP += 1
+    logger.info(f"Martingale step increased to {MARTINGALE_STEP}")
 
-# === ENTRY TIMING ===
+# === TIMING & SESSION ===
 def get_entry_timing(timeframe):
     now = datetime.datetime.utcnow()
-
     if timeframe == "5m":
-        total_seconds = 300
-        seconds_passed = (now.minute % 5) * 60 + now.second
+        total = 300
+        passed = (now.minute % 5) * 60 + now.second
     elif timeframe == "15m":
-        total_seconds = 900
-        seconds_passed = (now.minute % 15) * 60 + now.second
-
-    remaining = total_seconds - seconds_passed
-
-    if remaining > total_seconds * 0.5:
-        return f"⏳ WAIT ({remaining}s)"
+        total = 900
+        passed = (now.minute % 15) * 60 + now.second
     else:
-        return f"🚀 ENTRY ({remaining}s)"
+        return "⏳ N/A"
+    remaining = total - passed
+    return f"🚀 ENTRY ({remaining}s)" if remaining <= total * 0.5 else f"⏳ WAIT ({remaining}s)"
 
-# === SESSION FILTER ===
-def get_trading_session():
+def is_trading_session():
     hour = datetime.datetime.utcnow().hour
+    return 7 <= hour <= 22
 
-    if 7 <= hour < 13:
-        return "London"
-    elif 13 <= hour < 17:
-        return "Overlap"
-    elif 17 <= hour < 22:
-        return "NewYork"
-    return None
-
-# === PAIRS ===
+# === PAIRS & TIMEFRAMES ===
 PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "GBPJPY", "EURGBP", "XAUUSD"]
-
-TIMEFRAMES = ["5m", "15m"]  # HIGH ACCURACY MODE
+TIMEFRAMES = ["5m", "15m"]
 
 LAST_SIGNAL = {}
+BOT_RUNNING = True
 
 # === ANALYSIS ===
 def get_analysis(symbol, interval):
@@ -74,18 +74,18 @@ def get_analysis(symbol, interval):
     )
     return handler.get_analysis()
 
-# === SIGNAL LOGIC (UPGRADED ACCURACY) ===
-def generate_signal(pair, tf):
+# === SIGNAL GENERATOR (Improved) ===
+def generate_signal(pair, timeframe):
     try:
-        if not get_trading_session():
-            return None
+        if not is_trading_session():
+            return None  # Skip silently outside session
 
         interval_map = {
             "5m": Interval.INTERVAL_5_MINUTES,
             "15m": Interval.INTERVAL_15_MINUTES
         }
 
-        analysis = get_analysis(pair, interval_map[tf])
+        analysis = get_analysis(pair, interval_map[timeframe])
 
         rsi = analysis.indicators["RSI"]
         ema50 = analysis.indicators["EMA50"]
@@ -95,114 +95,129 @@ def generate_signal(pair, tf):
 
         trend = "UP" if price > ema50 else "DOWN"
 
-        # STRONGER FILTERS
+        # Filters (kept similar but cleaned)
         distance = abs(price - ema50)
-        strong_trend = distance > price * 0.0007
-
-        macd_power = abs(macd - macd_signal)
-        strong_macd = macd_power > 0.00007
-
-        # === IMPROVED SIGNAL LOGIC ===
-
+        strong_momentum = distance > price * 0.0008
+        strong_macd = abs(macd - macd_signal) > 0.00008
+        macd_aligned = (macd > 0 and trend == "UP") or (macd < 0 and trend == "DOWN")
+        clean_trend = (distance / price) > 0.0005
+        entry_ok = distance < (price * 0.0016)
         rsi_prev = analysis.indicators.get("RSI[1]", rsi)
         rsi_up = rsi > rsi_prev
         rsi_down = rsi < rsi_prev
+        pullback_ok = distance < (price * 0.0011)
+        stable_market = abs(price - analysis.indicators.get("close[1]", price)) < (price * 0.0015)
 
-        pullback_buy = price <= ema50 * 1.001
-        pullback_sell = price >= ema50 * 0.999
-
-        macd_confirm_buy = macd > macd_signal and macd > 0
-        macd_confirm_sell = macd < macd_signal and macd < 0
-
+        result = None
         if trend == "UP":
-            if (
-        52 < rsi < 65
-        and rsi_up
-        and macd_confirm_buy
-        and strong_trend
-        and pullback_buy
-        ):
-            signal = "🔥 STRONG BUY"
-  else:
-        return None
+            if (53 < rsi < 61 and rsi_up and macd > macd_signal and strong_macd and
+                macd_aligned and strong_momentum and clean_trend and entry_ok and
+                pullback_ok and stable_market):
+                result = f"🔥 STRONG BUY\n🟢 BUY @ {round(price,5)}"
+            elif (50 < rsi < 64 and rsi_up and macd > macd_signal and strong_macd and
+                  macd_aligned and clean_trend and stable_market):
+                result = f"⚡ QUICK BUY\n🟢 BUY @ {round(price,5)}"
+        else:
+            if (39 < rsi < 47 and rsi_down and macd < macd_signal and strong_macd and
+                macd_aligned and strong_momentum and clean_trend and entry_ok and
+                pullback_ok and stable_market):
+                result = f"🔥 STRONG SELL\n🔴 SELL @ {round(price,5)}"
+            elif (36 < rsi < 50 and rsi_down and macd < macd_signal and strong_macd and
+                  macd_aligned and clean_trend and stable_market):
+                result = f"⚡ QUICK SELL\n🔴 SELL @ {round(price,5)}"
 
-else:
-    if (
-        35 < rsi < 48
-        and rsi_down
-        and macd_confirm_sell
-        and strong_trend
-        and pullback_sell
-    ):
-        signal = "🔥 STRONG SELL"
-    else:
-        return None
-    
+        if not result:
+            return None
 
-        timing = get_entry_timing(tf)
+        timing = get_entry_timing(timeframe)
         amount = get_trade_amount()
 
-        expiration = "5-10 min" if tf == "5m" else "15-30 min"
-
         return f"""
-📊 AUTO SNIPER MODE (HIGH ACCURACY)
+📊 **Sigma AI v8 - Fully Automated**
 
-💱 {pair}
-⏱ TF: {tf}
-
-{signal}
+💱 Pair: {pair} | ⏱ TF: {timeframe}
+{result}
 {timing}
 
-💰 Amount: {amount}
-📉 Martingale: {MARTINGALE_STEP}
+🎯 ULTRA FILTERED • High Accuracy
+💰 Amount: {amount:.2f} | 📉 Martingale: {MARTINGALE_STEP}
 
-⏳ Expiration: {expiration}
-
-📊 RSI: {round(rsi,2)}
-📊 Trend: {trend}
-📊 MACD: {'Bullish' if macd > macd_signal else 'Bearish'}
-📊 Strength: {'Strong' if strong_trend else 'Weak'}
+⏳ Exp: {timeframe == "5m" and "5-10 min" or "15-30 min"}
+RSI: {round(rsi,2)} | Trend: {trend} | Stability: {'Stable' if stable_market else 'Volatile'}
 """
 
-    except:
+    except Exception as e:
+        logger.error(f"Error generating signal for {pair} {timeframe}: {e}")
         return None
 
 # === AUTO LOOP ===
 async def auto_signal_loop(context: ContextTypes.DEFAULT_TYPE):
-    global LAST_SIGNAL
+    global BOT_RUNNING
+    if not BOT_RUNNING:
+        return
 
     for pair in PAIRS:
         for tf in TIMEFRAMES:
             key = f"{pair}_{tf}"
-
             signal = generate_signal(pair, tf)
 
-            if signal:
-                if LAST_SIGNAL.get(key) == signal:
-                    continue
-
+            if signal and LAST_SIGNAL.get(key) != signal:
                 LAST_SIGNAL[key] = signal
-
                 for user in ALLOWED_USERS:
-                    await context.bot.send_message(chat_id=user, text=signal)
+                    try:
+                        await context.bot.send_message(chat_id=user, text=signal, parse_mode='Markdown')
+                    except Exception as e:
+                        logger.error(f"Failed to send to {user}: {e}")
 
-# === START ===
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# === COMMANDS ===
+async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
         return
+    global BOT_RUNNING
+    BOT_RUNNING = True
+    await update.message.reply_text("✅ **Bot Started** - Fully automated signals running (every 60s)")
 
+async def stop_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ALLOWED_USERS:
+        return
+    global BOT_RUNNING
+    BOT_RUNNING = False
+    await update.message.reply_text("⏹️ **Bot Stopped**")
+
+async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ALLOWED_USERS:
+        return
+    status = "🟢 Running" if BOT_RUNNING else "🔴 Stopped"
     await update.message.reply_text(
-        "🤖 AUTO BOT RUNNING (5m & 15m High Accuracy)\nNo manual clicking needed."
+        f"**Sigma AI Status**\n"
+        f"Status: {status}\n"
+        f"Martingale Step: {MARTINGALE_STEP}\n"
+        f"Base Amount: {BASE_AMOUNT}\n"
+        f"Pairs: {len(PAIRS)} | TFs: {TIMEFRAMES}"
     )
 
-# === APP ===
-app = ApplicationBuilder().token(TOKEN).build()
+async def reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ALLOWED_USERS:
+        return
+    reset_martingale()
+    await update.message.reply_text("✅ Martingale Reset")
 
-app.add_handler(CommandHandler("start", start))
+# === MAIN ===
+if __name__ == "__main__":
+    if not TOKEN:
+        logger.error("TOKEN environment variable not set!")
+        exit(1)
 
-# AUTO SCAN EVERY 60s
-app.job_queue.run_repeating(auto_signal_loop, interval=60, first=10)
+    app = ApplicationBuilder().token(TOKEN).build()
 
-app.run_polling()
-        
+    app.add_handler(CommandHandler("start", start_cmd))
+    app.add_handler(CommandHandler("stop", stop_cmd))
+    app.add_handler(CommandHandler("status", status_cmd))
+    app.add_handler(CommandHandler("reset", reset_cmd))
+
+    # Start auto loop immediately
+    app.job_queue.run_repeating(auto_signal_loop, interval=60, first=5)
+
+    logger.info("Sigma AI Fully Automated Bot Starting...")
+    app.run_polling()
