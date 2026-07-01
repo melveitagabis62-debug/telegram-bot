@@ -115,7 +115,7 @@ def generate_signal(pair, tf):
         macd_confirm_sell = macd < macd_signal and macd < 0
 
         if trend == "UP":
-        if (
+            if (
         52 < rsi < 65
         and rsi_up
         and macd_confirm_buy
