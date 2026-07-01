@@ -95,7 +95,14 @@ PAIRS = [
     "GBPJPY",
     "USDJPY",
     "AUDCAD",
-    "USDCAD"
+    "USDCAD",
+    "AUDCHF",
+    "AUDJPY",
+    "AUDUSD",
+    "CADCHF",
+    "EURAUD",
+    "EURCAD",
+    "GBPCAD"
     ]
 
 CRYPTO_PAIRS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]
