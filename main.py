@@ -245,4 +245,3 @@ app.add_handler(MessageHandler(filters.TEXT, start_button))
 print("Bot running...")
 app.run_polling()
 
-            
