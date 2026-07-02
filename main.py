@@ -114,6 +114,7 @@ def get_analysis(symbol, interval, market_type="forex"):
     except:
         return None
 
+        
 def generate_signal(pair, timeframe, market_type="forex"):
     try:
         interval_map = {
@@ -124,10 +125,14 @@ def generate_signal(pair, timeframe, market_type="forex"):
             "15m": Interval.INTERVAL_15_MINUTES
         }
 
-        analysis = get_analysis(pair, interval_map.get(timeframe), market_type)
+        selected_interval = interval_map.get(timeframe)
+        
+        analysis = get_analysis(pair, selected_interval, market_type)
+        
         if not analysis:
-            return "❌ Data not available for this timeframe. Try 1m/5m/15m."
+            return f"❌ No data available for {pair} on {timeframe}.\nTry another pair or wait a few seconds."
 
+        # Safe indicator extraction
         rsi = analysis.indicators.get("RSI", 50)
         ema50 = analysis.indicators.get("EMA50", 0)
         price = analysis.indicators.get("close", 0)
@@ -145,10 +150,13 @@ def generate_signal(pair, timeframe, market_type="forex"):
         entry_price = round(price, 5)
 
         def get_trend(tf):
-            a = get_analysis(pair, interval_map.get(tf, interval_map["1m"]), market_type)
-            if not a:
+            try:
+                a = get_analysis(pair, interval_map.get(tf, interval_map["1m"]), market_type)
+                if not a:
+                    return "NEUTRAL"
+                return "UP" if a.indicators.get("close", 0) > a.indicators.get("EMA50", 0) else "DOWN"
+            except:
                 return "NEUTRAL"
-            return "UP" if a.indicators.get("close", 0) > a.indicators.get("EMA50", 0) else "DOWN"
 
         trend_1m = get_trend("1m")
         trend_5m = get_trend("5m")
@@ -165,7 +173,6 @@ def generate_signal(pair, timeframe, market_type="forex"):
 
         is_ultra_short = timeframe in ["5s", "10s"]
 
-        # Aggressive OTC Strategy
         if market_type == "otc":
             if is_ultra_short:
                 if (rsi < 42 and stoch_oversold and macd_bullish and trend_1m == "UP" and volatility > 0.00015):
@@ -177,12 +184,11 @@ def generate_signal(pair, timeframe, market_type="forex"):
             else:
                 if (rsi < 40 and stoch_oversold and macd_bullish and trend_1m == "UP" and volatility > 0.0003):
                     signal = "BUY"
-                    confidence = 82 if adx > 28 else 70
+                    confidence = 80 if adx > 25 else 68
                 elif (rsi > 60 and stoch_overbought and macd_bearish and trend_1m == "DOWN" and volatility > 0.0003):
                     signal = "SELL"
-                    confidence = 82 if adx > 28 else 70
+                    confidence = 80 if adx > 25 else 68
         else:
-            # Forex / Crypto
             if mtf_aligned and volatility > 0.0004:
                 if (rsi < 45 and stoch_oversold and macd_bullish and trend_1m == "UP"):
                     signal = "BUY"
@@ -222,8 +228,10 @@ def generate_signal(pair, timeframe, market_type="forex"):
 """
 
     except Exception as e:
-        print("ERROR:", e)
-        return "❌ Failed to fetch data. Try a higher timeframe."
+        print(f"ERROR on {pair} {timeframe}: {str(e)}")
+        return f"❌ Error fetching data for **{pair}** on **{timeframe}**.\n\nTry again in 10-20 seconds or use a different pair."
+
+# Keep your get_analysis function as is (with try-except)
 
 # ================= HANDLERS =================
 
