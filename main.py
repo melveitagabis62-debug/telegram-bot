@@ -11,16 +11,17 @@ ALLOWED_USERS = [6351041498]
 
 # ================= PAIRS =================
 
-PAIRS = [  # Regular Forex
-    "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD",
+PAIRS = [
+    "EURUSD", "GBPUSD", "USDJPY", "AUDUSD",
+    "USDCAD", "USDCHF", "NZDUSD",
     "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY",
     "EURGBP", "EURCHF", "EURAUD", "EURCAD",
-    "GBPAUD", "GBPCAD", "GBPCHF", "AUDCAD", "AUDCHF", "CADCHF"
+    "GBPAUD", "GBPCAD", "GBPCHF",
+    "AUDCAD", "AUDCHF", "CADCHF"
 ]
 
 CRYPTO_PAIRS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]
 
-# ================= OTC PAIRS (Pocket Option Style) =================
 OTC_PAIRS = [
     "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD",
     "EURJPY", "GBPJPY", "AUDJPY", "EURGBP"
@@ -82,27 +83,40 @@ def otc_menu():
     return InlineKeyboardMarkup(keyboard)
 
 
-def timeframe_menu(pair):
-    keyboard = [
-        [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"),
-         InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
-        [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")],
-        [InlineKeyboardButton("⬅️ Back", callback_data="back_main")],
-    ]
+def timeframe_menu(pair, is_otc=False):
+    if is_otc:
+        keyboard = [
+            [InlineKeyboardButton("5s", callback_data=f"{pair}_5s"),
+             InlineKeyboardButton("10s", callback_data=f"{pair}_10s")],
+            [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"),
+             InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
+            [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="back_main")],
+        ]
+    else:
+        keyboard = [
+            [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"),
+             InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
+            [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="back_main")],
+        ]
     return InlineKeyboardMarkup(keyboard)
 
-# ================= SIGNAL ENGINE =================
+# ================= SIGNAL =================
 
 def get_analysis(symbol, interval, market_type="forex"):
     if market_type == "crypto":
-        return TA_Handler(symbol=symbol, screener="crypto", exchange="BINANCE", interval=interval).get_analysis()
-    else:  # forex + otc use same data source
-        return TA_Handler(symbol=symbol, screener="forex", exchange="FX_IDC", interval=interval).get_analysis()
+        handler = TA_Handler(symbol=symbol, screener="crypto", exchange="BINANCE", interval=interval)
+    else:
+        handler = TA_Handler(symbol=symbol, screener="forex", exchange="FX_IDC", interval=interval)
+    return handler.get_analysis()
 
 
 def generate_signal(pair, timeframe, market_type="forex"):
     try:
         interval_map = {
+            "5s": Interval.INTERVAL_5_SECONDS,
+            "10s": Interval.INTERVAL_10_SECONDS,
             "1m": Interval.INTERVAL_1_MINUTE,
             "5m": Interval.INTERVAL_5_MINUTES,
             "15m": Interval.INTERVAL_15_MINUTES
@@ -126,36 +140,45 @@ def generate_signal(pair, timeframe, market_type="forex"):
         warning = ""
         entry_price = round(price, 5)
 
-        # MTF Trend
         def get_trend(tf):
             a = get_analysis(pair, interval_map[tf], market_type)
             return "UP" if a.indicators.get("close", 0) > a.indicators.get("EMA50", 0) else "DOWN"
 
         trend_1m = get_trend("1m")
-        trend_5m = get_trend("5m")
-        trend_15m = get_trend("15m")
+        trend_5m = get_trend("5m") if timeframe != "5s" else trend_1m
+        trend_15m = get_trend("15m") if timeframe not in ["5s", "10s"] else trend_1m
 
         up_count = sum(t == "UP" for t in [trend_1m, trend_5m, trend_15m])
         mtf_aligned = max(up_count, 3 - up_count) >= 2
 
         macd_bullish = macd > macd_signal
         macd_bearish = macd < macd_signal
-        stoch_oversold = stoch_k < 30
-        stoch_overbought = stoch_k > 70
-
+        stoch_oversold = stoch_k < 35   # More relaxed for fast TF
+        stoch_overbought = stoch_k > 65
         volatility = (high - low) / price if price > 0 else 0
 
-        # ================= OTC SPECIFIC STRATEGY (Pocket Option Style) =================
+        # ================= AGGRESSIVE OTC 5s/10s STRATEGY =================
+        is_ultra_short = timeframe in ["5s", "10s"]
+
         if market_type == "otc":
-            # OTC pairs tend to have stronger fakeouts + momentum bursts
-            if (rsi < 40 and stoch_oversold and macd_bullish and trend_1m == "UP" and volatility > 0.0003):
-                signal = "BUY"
-                confidence = 82 if adx > 28 else 70
-            elif (rsi > 60 and stoch_overbought and macd_bearish and trend_1m == "DOWN" and volatility > 0.0003):
-                signal = "SELL"
-                confidence = 82 if adx > 28 else 70
+            if is_ultra_short:
+                # Very aggressive for 5s/10s
+                if (rsi < 42 and stoch_oversold and macd_bullish and trend_1m == "UP" and volatility > 0.0002):
+                    signal = "BUY"
+                    confidence = 78 if adx > 25 else 65
+                elif (rsi > 58 and stoch_overbought and macd_bearish and trend_1m == "DOWN" and volatility > 0.0002):
+                    signal = "SELL"
+                    confidence = 78 if adx > 25 else 65
+            else:
+                # Normal OTC
+                if (rsi < 40 and stoch_oversold and macd_bullish and trend_1m == "UP" and volatility > 0.0003):
+                    signal = "BUY"
+                    confidence = 82 if adx > 28 else 70
+                elif (rsi > 60 and stoch_overbought and macd_bearish and trend_1m == "DOWN" and volatility > 0.0003):
+                    signal = "SELL"
+                    confidence = 82 if adx > 28 else 70
         else:
-            # Normal logic for Forex/Crypto
+            # Forex / Crypto (unchanged)
             if mtf_aligned and volatility > 0.0004:
                 if (rsi < 45 and stoch_oversold and macd_bullish and trend_1m == "UP"):
                     signal = "BUY"
@@ -165,7 +188,7 @@ def generate_signal(pair, timeframe, market_type="forex"):
                     confidence = 75 + (int(adx > 25) * 15)
 
         # Fallback
-        if signal == "HOLD" and mtf_aligned:
+        if signal == "HOLD" and mtf_aligned and not is_ultra_short:
             if trend_1m == trend_5m == "UP" and rsi < 52 and macd_bullish:
                 signal = "BUY"
                 confidence = 55
@@ -173,10 +196,11 @@ def generate_signal(pair, timeframe, market_type="forex"):
                 signal = "SELL"
                 confidence = 55
 
-        if signal != "HOLD" and abs(price - ema50) / price > 0.004:
-            warning = "⚠️ Consider EMA50 retest"
+        if signal != "HOLD" and abs(price - ema50) / price > 0.0045:
+            warning = "⚠️ Fast retest recommended"
 
-        result = f"🟢 BUY @ {entry_price}" if signal == "BUY" else f"🔴 SELL @ {entry_price}" if signal == "SELL" else "🟡 HOLD"
+        result = f"🟢 BUY @ {entry_price}" if signal == "BUY" else \
+                 f"🔴 SELL @ {entry_price}" if signal == "SELL" else "🟡 HOLD"
         conf_badge = f" | **{confidence}%**" if confidence > 0 else ""
 
         try:
@@ -242,13 +266,18 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"⏱ Select timeframe for {pair}", reply_markup=timeframe_menu(pair))
     elif data.startswith("otc_"):
         pair = data.replace("otc_", "")
-        await query.edit_message_text(f"⏱ Select timeframe for {pair} OTC", reply_markup=timeframe_menu(pair))
+        await query.edit_message_text(f"⏱ Select timeframe for {pair} OTC", reply_markup=timeframe_menu(pair, is_otc=True))
 
-    elif "_" in data and not any(x in data for x in ["back", "forex", "crypto", "otc"]):
-        parts = data.split("_")
+    elif "_" in data:
+        parts = data.split("_", 1)
         pair = parts[0]
         timeframe = parts[1]
-        market_type = "otc" if data.startswith(tuple(OTC_PAIRS)) or "otc" in data else "crypto" if "USDT" in pair else "forex"
+        if data.startswith(tuple(OTC_PAIRS)) or "otc_" in data:
+            market_type = "otc"
+        elif "USDT" in pair:
+            market_type = "crypto"
+        else:
+            market_type = "forex"
         result = generate_signal(pair, timeframe, market_type)
         await query.edit_message_text(result, parse_mode="Markdown")
 
@@ -256,7 +285,4 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(handle_buttons))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
-app.run_polling()
+app.add_handler(CallbackQueryHandler(handle_buttons
