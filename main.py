@@ -120,7 +120,7 @@ def get_analysis(symbol, interval):
     return analysis
 
 
-# 🔥🔥 HIGH FREQUENCY STRATEGY (UPGRADED)
+# 🔥🔥 HIGH FREQUENCY STRATEGY v2 - HIGHER ACCURACY
 def generate_signal(pair, timeframe):
     try:
         interval_map = {
@@ -131,108 +131,112 @@ def generate_signal(pair, timeframe):
 
         analysis = get_analysis(pair, interval_map[timeframe])
 
-        rsi = analysis.indicators["RSI"]
-        ema50 = analysis.indicators["EMA50"]
-        price = analysis.indicators["close"]
-        open_price = analysis.indicators["open"]
-        high = analysis.indicators["high"]
-        low = analysis.indicators["low"]
+        # Core indicators
+        rsi = analysis.indicators.get("RSI", 50)
+        ema50 = analysis.indicators.get("EMA50", 0)
+        price = analysis.indicators.get("close", 0)
+        high = analysis.indicators.get("high", 0)
+        low = analysis.indicators.get("low", 0)
+        
+        # Additional indicators for better confluence
+        macd = analysis.indicators.get("MACD.macd", 0)
+        macd_signal = analysis.indicators.get("MACD.signal", 0)
+        stoch_k = analysis.indicators.get("Stoch.K", 50)
+        adx = analysis.indicators.get("ADX", 20)  # Trend strength
+        bb_upper = analysis.indicators.get("BB.upper", price * 1.02)
+        bb_lower = analysis.indicators.get("BB.lower", price * 0.98)
 
         signal = "HOLD"
+        confidence = 0
         warning = ""
-        entry_price = None
-        direction = ""
+        entry_price = round(price, 5)
 
-        # ================= MULTI TIMEFRAME (RELAXED) =================
+        # ================= MULTI TIMEFRAME CONFLUENCE (STRICTER) =================
         def get_trend(tf):
             a = get_analysis(pair, interval_map[tf])
-            if a.indicators["close"] > a.indicators["EMA50"]:
-                return "UP"
-            else:
-                return "DOWN"
+            close_tf = a.indicators.get("close", 0)
+            ema_tf = a.indicators.get("EMA50", 0)
+            return "UP" if close_tf > ema_tf else "DOWN"
 
         trend_1m = get_trend("1m")
         trend_5m = get_trend("5m")
         trend_15m = get_trend("15m")
 
-        # Relaxed: only require 1m and 5m alignment for higher frequency
-        if not (trend_1m == trend_5m):
-            # Still show trend but don't block
-            pass
+        # Require at least 2/3 timeframes aligned (better than before)
+        up_trends = sum([trend_1m == "UP", trend_5m == "UP", trend_15m == "UP"])
+        down_trends = 3 - up_trends
+        mtf_aligned = max(up_trends, down_trends) >= 2
 
-        # ================= SUPPORT / RESISTANCE =================
-        support = low
-        resistance = high
+        # ================= MOMENTUM & OSCILLATORS =================
+        macd_bullish = macd > macd_signal
+        macd_bearish = macd < macd_signal
+        stoch_oversold = stoch_k < 30
+        stoch_overbought = stoch_k > 70
 
-        near_support = abs(price - support) / price < 0.003  # Wider zone
-        near_resistance = abs(price - resistance) / price < 0.003
+        # ================= VOLATILITY FILTER (Avoid chop) =================
+        atr = analysis.indicators.get("ATR", 0.0005)  # Rough fallback
+        volatility = (high - low) / price
+        is_volatile_enough = volatility > 0.0005  # Filter very tight ranges
 
-        # ================= NO TRADE ZONE (RELAXED) =================
-        if 48 < rsi < 52:  # Narrower sideways zone
-            pass  # No hard HOLD
+        # ================= CONFLUENCE-BASED SIGNAL LOGIC =================
+        if mtf_aligned and is_volatile_enough:
+            if (rsi < 45 and stoch_oversold and macd_bullish and 
+                trend_1m == "UP" and price < bb_upper * 0.995):  # Near lower band or support
+                signal = "BUY"
+                confidence = 75 + (int(adx > 25) * 15)  # ADX bonus for strong trend
+            
+            elif (rsi > 55 and stoch_overbought and macd_bearish and 
+                  trend_1m == "DOWN" and price > bb_lower * 1.005):
+                signal = "SELL"
+                confidence = 75 + (int(adx > 25) * 15)
 
-        # ================= HIGH FREQUENCY STRATEGY =================
-        # More aggressive RSI thresholds + trend bias
-        if rsi < 40 and (near_support or trend_1m == "UP"):
+        # Fallback with higher threshold (less frequent but higher quality)
+        elif trend_1m == trend_5m == "UP" and rsi < 50 and macd_bullish:
             signal = "BUY"
-            direction = "CALL"
-
-        elif rsi > 60 and (near_resistance or trend_1m == "DOWN"):
+            confidence = 60
+        elif trend_1m == trend_5m == "DOWN" and rsi > 50 and macd_bearish:
             signal = "SELL"
-            direction = "PUT"
+            confidence = 60
 
-        elif trend_1m == "UP":
-            signal = "BUY"
-            direction = "CALL"
+        # ================= RETEST / PULLBACK FILTER =================
+        distance_to_ema = abs(price - ema50) / price
+        if signal != "HOLD" and distance_to_ema > 0.0035:
+            warning = "⚠️ Wait for EMA50 retest"
 
-        elif trend_1m == "DOWN":
-            signal = "SELL"
-            direction = "PUT"
+        # ================= FINAL OUTPUT =================
+        direction = "CALL" if signal == "BUY" else "PUT" if signal == "SELL" else ""
+        result = f"🟢 BUY @ {entry_price}" if signal == "BUY" else \
+                 f"🔴 SELL @ {entry_price}" if signal == "SELL" else "🟡 HOLD"
 
-        # ================= RETEST ENTRY (RELAXED) =================
-        if signal != "HOLD":
-            if abs(price - ema50) / price > 0.005:  # Wider tolerance
-                # Still suggest but don't block signal
-                warning = "⚠️ Consider retest to EMA50"
+        # Confidence badge
+        conf_badge = f" | **{confidence}%**" if confidence > 0 else ""
 
-        # ================= FINAL =================
-        if signal == "BUY":
-            entry_price = round(price, 5)
-            result = f"🟢 BUY @ {entry_price}"
-
-        elif signal == "SELL":
-            entry_price = round(price, 5)
-            result = f"🔴 SELL @ {entry_price}"
-
-        else:
-            result = "🟡 HOLD"
-
-        # ================= LOGGING =================
+        # Logging
         try:
             with open("trades.txt", "a") as f:
-                f.write(f"{pair} | {timeframe} | {signal} | {price}\n")
+                f.write(f"{pair} | {timeframe} | {signal} | {price} | conf:{confidence}\n")
         except:
             pass
 
-        alignment = f"{trend_1m} / {trend_5m} / {trend_15m}"
+        alignment = f"{trend_1m}/{trend_5m}/{trend_15m}"
 
         return f"""
-📊 **Sigma AI Signal (HIGH FREQ)**
+📊 **Sigma AI Signal v2 (HIGH ACCURACY)**
 
 💱 Pair: **{pair}**
 ⏱ Timeframe: **{timeframe}**
 
-📈 {result} {warning}
+📈 {result}{conf_badge} {warning}
 
-📊 RSI: {round(rsi,2)}
-📊 EMA50: {round(ema50,5)}
-
+📊 RSI: {round(rsi,2)} | Stoch: {round(stoch_k,1)}
+📊 MACD: {"Bullish" if macd_bullish else "Bearish"}
+📊 ADX: {round(adx,1)} (Trend Strength)
 📊 Trend: {alignment}
 """
 
     except Exception as e:
         print("ERROR:", e)
-        return "❌ Failed to fetch data."
+        return "❌ Failed to fetch data. Try again."
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
