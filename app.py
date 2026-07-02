@@ -1,6 +1,6 @@
 from flask import Flask, request, render_template, jsonify
 import os
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter
 import pytesseract
 import numpy as np
 import datetime
@@ -11,28 +11,68 @@ UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
+def preprocess_image(image):
+    """Improve image for better OCR"""
+    # Convert to grayscale
+    gray = image.convert('L')
+    # Enhance contrast
+    enhancer = ImageEnhance.Contrast(gray)
+    enhanced = enhancer.enhance(2.0)
+    # Sharpen
+    enhanced = enhanced.filter(ImageFilter.SHARPEN)
+    return enhanced
 
 def analyze_chart(image):
     try:
-        text = pytesseract.image_to_string(image, config=r'--oem 3 --psm 6')
+        processed = preprocess_image(image)
+        text = pytesseract.image_to_string(processed, config=r'--oem 3 --psm 6')
+        lower_text = text.lower()
+        
+        score = 0
+        reasons = []
+        
+        # Bullish signals
+        if any(word in lower_text for word in ['bull', 'uptrend', 'breakout', 'support', 'buy', 'long']):
+            score += 2
+            reasons.append("Bullish keywords detected")
+        # Bearish signals
+        if any(word in lower_text for word in ['bear', 'downtrend', 'breakdown', 'resistance', 'sell', 'short']):
+            score -= 2
+            reasons.append("Bearish keywords detected")
+        
+        # Color analysis simulation (simple)
+        if "green" in lower_text or "bull" in lower_text:
+            score += 1
+        if "red" in lower_text or "bear" in lower_text:
+            score -= 1
+        
+        # Final trend
+        if score >= 2:
+            trend = "Bullish"
+            confidence = "High"
+        elif score <= -2:
+            trend = "Bearish"
+            confidence = "High"
+        elif score > 0:
+            trend = "Slightly Bullish"
+            confidence = "Medium"
+        elif score < 0:
+            trend = "Slightly Bearish"
+            confidence = "Medium"
+        else:
+            trend = "Neutral / Sideways"
+            confidence = "Low"
         
         analysis = {
             "timestamp": datetime.datetime.now().isoformat(),
-            "extracted_text": text.strip()[:600],
-            "image_size": image.size,
-            "trend": "Neutral / Unclear",
-            "confidence": "Medium",
-            "suggestions": []
+            "extracted_text": text.strip()[:700],
+            "trend": trend,
+            "confidence": confidence,
+            "score": score,
+            "reasons": reasons[:5]
         }
-        
-        lower = text.lower()
-        if any(x in lower for x in ["bull", "uptrend", "breakout", "support"]):
-            analysis["trend"] = "Potentially Bullish"
-            analysis["suggestions"].append("Check for volume confirmation")
-        elif any(x in lower for x in ["bear", "downtrend", "breakdown", "resistance"]):
-            analysis["trend"] = "Potentially Bearish"
-            analysis["suggestions"].append("Watch risk levels")
         
         return analysis
     except Exception as e:
