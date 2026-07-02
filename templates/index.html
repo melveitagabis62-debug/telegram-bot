@@ -3,26 +3,75 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chart Screener Bot</title>
+    <title>Chart Screener</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; }
-        .upload-area { border: 3px dashed #007bff; padding: 50px; text-align: center; border-radius: 12px; }
-        button { padding: 12px 30px; font-size: 18px; background: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer; }
-        .result { margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 10px; white-space: pre-wrap; }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #0f0f12;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 15px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .upload-box {
+            background: #1a1a20;
+            border-radius: 16px;
+            padding: 25px;
+            text-align: center;
+            border: 2px dashed #4a90e2;
+        }
+        input[type="file"] {
+            margin: 15px 0;
+        }
+        button {
+            background: #00d4aa;
+            color: black;
+            border: none;
+            padding: 14px 32px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 12px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+        }
+        .result {
+            margin-top: 20px;
+            background: #1a1a20;
+            border-radius: 16px;
+            padding: 20px;
+            display: none;
+        }
+        .signal {
+            font-size: 28px;
+            font-weight: bold;
+            padding: 12px;
+            border-radius: 12px;
+            text-align: center;
+            margin: 15px 0;
+        }
+        .buy { background: #00c853; color: black; }
+        .sell { background: #f44336; color: white; }
+        .neutral { background: #ffa726; color: black; }
     </style>
 </head>
 <body>
-    <h1>📈 Trading Chart Screener Bot</h1>
-    <p>Upload a screenshot of any trading chart</p>
-    
-    <div class="upload-area">
+    <div class="header">
+        <h1>📊 Chart Screener Bot</h1>
+        <p>AI Trading Signal Analyzer</p>
+    </div>
+
+    <div class="upload-box">
         <form id="uploadForm" enctype="multipart/form-data">
-            <input type="file" id="fileInput" accept="image/*" required><br><br>
-            <button type="submit">Analyze Chart →</button>
+            <input type="file" id="fileInput" accept="image/*" required>
+            <button type="submit">Analyze Chart</button>
         </form>
     </div>
 
-    <div id="result" class="result" style="display:none;"></div>
+    <div id="result" class="result"></div>
 
     <script>
         document.getElementById('uploadForm').addEventListener('submit', async (e) => {
@@ -33,14 +82,30 @@
             const res = await fetch('/upload', { method: 'POST', body: formData });
             const data = await res.json();
             const div = document.getElementById('result');
-            
+
             if (data.status === "success") {
-                div.innerHTML = `<h2>✅ Analysis Result</h2>
-                <strong>Trend:</strong> ${data.analysis.trend}<br>
-                <strong>Confidence:</strong> ${data.analysis.confidence}<br><br>
-                <strong>Extracted Text:</strong><br>${data.analysis.extracted_text || 'None'}`;
+                const a = data.analysis;
+                let signalHTML = '';
+                
+                if (a.trend.includes("Bullish")) {
+                    signalHTML = `<div class="signal buy">🟢 BUY SIGNAL</div>`;
+                } else if (a.trend.includes("Bearish")) {
+                    signalHTML = `<div class="signal sell">🔴 SELL SIGNAL</div>`;
+                } else {
+                    signalHTML = `<div class="signal neutral">⚪ NEUTRAL</div>`;
+                }
+
+                div.innerHTML = `
+                    ${signalHTML}
+                    <p><strong>Trend:</strong> ${a.trend}</p>
+                    <p><strong>Confidence:</strong> ${a.confidence}</p>
+                    ${a.reasons ? `<p><strong>Reasons:</strong> ${a.reasons.join(', ')}</p>` : ''}
+                    **Summary:**
+Extracted Text
+                        <p style="font-size:0.9em; opacity:0.8;">${a.extracted_text || 'None'}</p>
+                `;
             } else {
-                div.innerHTML = `<strong style="color:red">Error: ${data.error}</strong>`;
+                div.innerHTML = `<p style="color:red">Error: ${data.error}</p>`;
             }
             div.style.display = 'block';
         });
