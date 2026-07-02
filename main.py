@@ -105,12 +105,14 @@ def timeframe_menu(pair, is_otc=False):
 # ================= SIGNAL =================
 
 def get_analysis(symbol, interval, market_type="forex"):
-    if market_type == "crypto":
-        handler = TA_Handler(symbol=symbol, screener="crypto", exchange="BINANCE", interval=interval)
-    else:
-        handler = TA_Handler(symbol=symbol, screener="forex", exchange="FX_IDC", interval=interval)
-    return handler.get_analysis()
-
+    try:
+        if market_type == "crypto":
+            handler = TA_Handler(symbol=symbol, screener="crypto", exchange="BINANCE", interval=interval)
+        else:
+            handler = TA_Handler(symbol=symbol, screener="forex", exchange="FX_IDC", interval=interval)
+        return handler.get_analysis()
+    except:
+        return None
 
 def generate_signal(pair, timeframe, market_type="forex"):
     try:
@@ -122,7 +124,9 @@ def generate_signal(pair, timeframe, market_type="forex"):
             "15m": Interval.INTERVAL_15_MINUTES
         }
 
-        analysis = get_analysis(pair, interval_map[timeframe], market_type)
+        analysis = get_analysis(pair, interval_map.get(timeframe), market_type)
+        if not analysis:
+            return "❌ Data not available for this timeframe. Try 1m/5m/15m."
 
         rsi = analysis.indicators.get("RSI", 50)
         ema50 = analysis.indicators.get("EMA50", 0)
@@ -141,36 +145,36 @@ def generate_signal(pair, timeframe, market_type="forex"):
         entry_price = round(price, 5)
 
         def get_trend(tf):
-            a = get_analysis(pair, interval_map[tf], market_type)
+            a = get_analysis(pair, interval_map.get(tf, interval_map["1m"]), market_type)
+            if not a:
+                return "NEUTRAL"
             return "UP" if a.indicators.get("close", 0) > a.indicators.get("EMA50", 0) else "DOWN"
 
         trend_1m = get_trend("1m")
-        trend_5m = get_trend("5m") if timeframe != "5s" else trend_1m
-        trend_15m = get_trend("15m") if timeframe not in ["5s", "10s"] else trend_1m
+        trend_5m = get_trend("5m")
+        trend_15m = get_trend("15m")
 
         up_count = sum(t == "UP" for t in [trend_1m, trend_5m, trend_15m])
         mtf_aligned = max(up_count, 3 - up_count) >= 2
 
         macd_bullish = macd > macd_signal
         macd_bearish = macd < macd_signal
-        stoch_oversold = stoch_k < 35   # More relaxed for fast TF
+        stoch_oversold = stoch_k < 35
         stoch_overbought = stoch_k > 65
         volatility = (high - low) / price if price > 0 else 0
 
-        # ================= AGGRESSIVE OTC 5s/10s STRATEGY =================
         is_ultra_short = timeframe in ["5s", "10s"]
 
+        # Aggressive OTC Strategy
         if market_type == "otc":
             if is_ultra_short:
-                # Very aggressive for 5s/10s
-                if (rsi < 42 and stoch_oversold and macd_bullish and trend_1m == "UP" and volatility > 0.0002):
+                if (rsi < 42 and stoch_oversold and macd_bullish and trend_1m == "UP" and volatility > 0.00015):
                     signal = "BUY"
-                    confidence = 78 if adx > 25 else 65
-                elif (rsi > 58 and stoch_overbought and macd_bearish and trend_1m == "DOWN" and volatility > 0.0002):
+                    confidence = 75
+                elif (rsi > 58 and stoch_overbought and macd_bearish and trend_1m == "DOWN" and volatility > 0.00015):
                     signal = "SELL"
-                    confidence = 78 if adx > 25 else 65
+                    confidence = 75
             else:
-                # Normal OTC
                 if (rsi < 40 and stoch_oversold and macd_bullish and trend_1m == "UP" and volatility > 0.0003):
                     signal = "BUY"
                     confidence = 82 if adx > 28 else 70
@@ -178,7 +182,7 @@ def generate_signal(pair, timeframe, market_type="forex"):
                     signal = "SELL"
                     confidence = 82 if adx > 28 else 70
         else:
-            # Forex / Crypto (unchanged)
+            # Forex / Crypto
             if mtf_aligned and volatility > 0.0004:
                 if (rsi < 45 and stoch_oversold and macd_bullish and trend_1m == "UP"):
                     signal = "BUY"
@@ -186,15 +190,6 @@ def generate_signal(pair, timeframe, market_type="forex"):
                 elif (rsi > 55 and stoch_overbought and macd_bearish and trend_1m == "DOWN"):
                     signal = "SELL"
                     confidence = 75 + (int(adx > 25) * 15)
-
-        # Fallback
-        if signal == "HOLD" and mtf_aligned and not is_ultra_short:
-            if trend_1m == trend_5m == "UP" and rsi < 52 and macd_bullish:
-                signal = "BUY"
-                confidence = 55
-            elif trend_1m == trend_5m == "DOWN" and rsi > 48 and macd_bearish:
-                signal = "SELL"
-                confidence = 55
 
         if signal != "HOLD" and abs(price - ema50) / price > 0.0045:
             warning = "⚠️ Fast retest recommended"
@@ -228,8 +223,7 @@ def generate_signal(pair, timeframe, market_type="forex"):
 
     except Exception as e:
         print("ERROR:", e)
-        return "❌ Failed to fetch data. Try again."
-
+        return "❌ Failed to fetch data. Try a higher timeframe."
 
 # ================= HANDLERS =================
 
