@@ -3,29 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Chart Screener</title>
-
+    <title>Chart Screener</title>
     <style>
-        body {
-            font-family: 'Segoe UI', sans-serif;
-            background: #0a0a0f;
-            color: #e0e0e0;
-            margin: 0;
-            padding: 15px;
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 20px;
-        }
-
+        body { font-family: 'Segoe UI', sans-serif; background: #0a0a0f; color: #e0e0e0; margin:0; padding:15px; }
+        .header { text-align:center; margin-bottom:20px; }
         .card {
             background: #16161f;
             border-radius: 16px;
             padding: 20px;
             margin-bottom: 20px;
         }
-
         button {
             background: linear-gradient(135deg, #00d4aa, #00b894);
             color: black;
@@ -36,37 +23,27 @@
             border-radius: 12px;
             width: 100%;
         }
-
-        .signal {
-            font-size: 32px;
-            font-weight: bold;
-            text-align: center;
-            padding: 15px;
-            border-radius: 12px;
-            margin: 15px 0;
+        .signal { font-size: 32px; font-weight: bold; text-align:center; padding: 15px; border-radius: 12px; margin:15px 0; }
+        .buy { background: #00c853; color: black; }
+        .sell { background: #f44336; color: white; }
+        .favorability {
+            height: 12px;
+            background: #333;
+            border-radius: 999px;
+            overflow: hidden;
+            margin: 10px 0;
         }
-
-        .buy {
-            background: #00c853;
-            color: black;
-        }
-
-        .sell {
-            background: #f44336;
-            color: white;
-        }
+        .bar { height: 100%; background: linear-gradient(to right, #00c853, #ffd700); }
     </style>
 </head>
-
 <body>
-
     <div class="header">
         <h1>📊 AI Chart Screener</h1>
         <p>Professional Signal Analyzer</p>
     </div>
 
     <div class="card">
-        <form id="uploadForm">
+        <form id="uploadForm" enctype="multipart/form-data">
             <input type="file" id="fileInput" accept="image/*" style="margin-bottom:15px;" required>
             <button type="submit">Analyze Screenshot</button>
         </form>
@@ -74,40 +51,43 @@
 
     <div id="result" class="card" style="display:none;"></div>
 
-<script>
-async function uploadImage() {
-    const fileInput = document.getElementById("fileInput");
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData();
+            formData.append('file', document.getElementById('fileInput').files[0]);
 
-    if (!fileInput.files.length) {
-        alert("Select a file first");
-        return;
-    }
+            const res = await fetch('/upload', { method: 'POST', body: formData });
+            const data = await res.json();
+            const div = document.getElementById('result');
 
-    const formData = new FormData();
-    formData.append("file", fileInput.files[0]);
+            if (data.status === "success") {
+                const a = data.analysis;
+                const isBullish = a.trend.toLowerCase().includes("bull");
+                const score = a.score || 0;
+                const percent = Math.min(Math.max(30 + score * 15, 30), 85);
 
-    try {
-        const res = await fetch("/upload", {
-            method: "POST",
-            body: formData
+                div.innerHTML = `
+                    <h2 style="margin-top:0;">${a.trend}</h2>
+                    ${isBullish ? 
+                        `<div class="signal buy">🟢 STRONG BUY</div>` : 
+                        `<div class="signal sell">🔴 SELL SIGNAL</div>`}
+                    
+                    <p><strong>Favourability:</strong> ${percent}%</p>
+                    <div class="favorability"><div class="bar" style="width:${percent}%"></div></div>
+                    
+                    <p><strong>Confidence:</strong> ${a.confidence}</p>
+                    ${a.reasons && a.reasons.length ? `<p><strong>Reasoning:</strong> ${a.reasons.join(' • ')}</p>` : ''}
+                    
+                    **Summary:**
+Raw Extracted Text
+                        <p style="font-size:0.85em; opacity:0.75;">${a.extracted_text || 'No text detected'}</p>
+                `;
+            } else {
+                div.innerHTML = `<p style="color:#ff5252">Error: ${data.error}</p>`;
+            }
+            div.style.display = 'block';
         });
-
-        const data = await res.json();
-
-        console.log(data); // 👈 DEBUG
-
-        document.getElementById("signal").innerText = data.signal || "ERROR";
-        document.getElementById("imageTrend").innerText = data.image_trend || "N/A";
-        document.getElementById("dataTrend").innerText = data.data_trend || "N/A";
-        document.getElementById("candleBias").innerText = data.candle_bias || "N/A";
-        document.getElementById("rsi").innerText = data.rsi ?? "N/A";
-
-    } catch (err) {
-        alert("Server error");
-        console.error(err);
-    }
-}
-</script>
-
+    </script>
 </body>
 </html>
