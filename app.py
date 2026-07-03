@@ -1,175 +1,224 @@
-from flask import Flask, request, render_template, jsonify
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+
+from tradingview_ta import TA_Handler, Interval
 import os
-from PIL import Image, ImageEnhance, ImageFilter
-import pytesseract
-import numpy as np
-import datetime
-import cv2
+import time
 
-app = Flask(__name__)
+TOKEN = os.getenv("TOKEN")
+ALLOWED_USERS = [6351041498]
 
-UPLOAD_FOLDER = 'uploads'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+PAIRS = [
+    "EURUSD", "GBPUSD", "USDJPY", "AUDUSD",
+    "USDCAD", "USDCHF", "NZDUSD",
+    "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY",
+    "EURGBP", "EURCHF", "EURAUD", "EURCAD",
+    "GBPAUD", "GBPCAD", "GBPCHF",
+    "AUDCAD", "AUDCHF",
+    "CADCHF"
+]
 
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+# ================= MENU =================
+
+def main_menu():
+    keyboard = [
+        [InlineKeyboardButton("📊 Forex", callback_data="forex")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
 
-# ================= IMAGE PROCESSING =================
-def preprocess_image(image):
-    gray = image.convert('L')
-    enhancer = ImageEnhance.Contrast(gray)
-    enhanced = enhancer.enhance(2.5)
-    enhanced = enhanced.filter(ImageFilter.SHARPEN)
-    return enhanced
+def forex_menu():
+    keyboard = []
+    row = []
+
+    for i, pair in enumerate(PAIRS, 1):
+        display = pair[:3] + "/" + pair[3:]
+        row.append(InlineKeyboardButton(display, callback_data=pair))
+
+        if i % 2 == 0:
+            keyboard.append(row)
+            row = []
+
+    if row:
+        keyboard.append(row)
+
+    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="back_main")])
+
+    return InlineKeyboardMarkup(keyboard)
 
 
-# ================= EXTRACT TEXT =================
-def extract_text(image):
-    processed = preprocess_image(image)
-    text = pytesseract.image_to_string(
-        processed,
-        config='--oem 3 --psm 6'
+def timeframe_menu(pair):
+    keyboard = [
+        [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"),
+         InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
+        [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="back_forex")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+# ================= ANALYSIS =================
+
+def get_analysis(symbol, interval):
+    handler = TA_Handler(
+        symbol=symbol,
+        screener="forex",
+        exchange="FX_IDC",
+        interval=interval
     )
-    return text.lower()
+    return handler.get_analysis()
 
 
-# ================= DETECT PRICE LEVELS =================
-def extract_numbers(text):
-    import re
-    numbers = re.findall(r'\d+\.\d+|\d+', text)
-    numbers = [float(n) for n in numbers if len(n) > 2]
-    return numbers
-
-
-# ================= SIMPLE TREND LOGIC =================
-def analyze_logic(text, numbers):
-    score = 0
-    reasons = []
-
-    # ---- STRUCTURE KEYWORDS ----
-    if "higher high" in text or "uptrend" in text:
-        score += 2
-        reasons.append("Uptrend structure detected")
-
-    if "lower low" in text or "downtrend" in text:
-        score -= 2
-        reasons.append("Downtrend structure detected")
-
-    # ---- BREAKOUT / BREAKDOWN ----
-    if "breakout" in text:
-        score += 2
-        reasons.append("Breakout signal")
-
-    if "breakdown" in text:
-        score -= 2
-        reasons.append("Breakdown signal")
-
-    # ---- SUPPORT / RESISTANCE ----
-    if "support" in text:
-        score += 1
-        reasons.append("Near support")
-
-    if "resistance" in text:
-        score -= 1
-        reasons.append("Near resistance")
-
-    # ---- MOMENTUM WORDS ----
-    if "strong" in text:
-        score += 1
-    if "weak" in text:
-        score -= 1
-
-    # ---- NUMBER-BASED LOGIC ----
-    if len(numbers) >= 3:
-        if numbers[-1] > numbers[0]:
-            score += 1
-            reasons.append("Price rising structure")
-        else:
-            score -= 1
-            reasons.append("Price falling structure")
-
-    return score, reasons
-
-
-# ================= FINAL DECISION =================
-def get_signal(score):
-    if score >= 3:
-        return "STRONG BUY", "High"
-    elif score == 2:
-        return "BUY", "Medium"
-    elif score == 1:
-        return "WEAK BUY", "Low"
-    elif score == 0:
-        return "NO TRADE", "Low"
-    elif score == -1:
-        return "WEAK SELL", "Low"
-    elif score == -2:
-        return "SELL", "Medium"
-    else:
-        return "STRONG SELL", "High"
-
-
-# ================= MAIN ANALYSIS =================
-def analyze_chart(image):
+def generate_signal(pair, timeframe):
     try:
-        text = extract_text(image)
-        numbers = extract_numbers(text)
+        from datetime import datetime
 
-        score, reasons = analyze_logic(text, numbers)
-        signal, confidence = get_signal(score)
-
-        analysis = {
-            "timestamp": datetime.datetime.now().isoformat(),
-            "signal": signal,
-            "confidence": confidence,
-            "score": score,
-            "numbers_detected": numbers[:10],
-            "reasons": reasons[:5],
-            "raw_text": text[:500]
+        interval_map = {
+            "1m": Interval.INTERVAL_1_MINUTE,
+            "5m": Interval.INTERVAL_5_MINUTES,
+            "15m": Interval.INTERVAL_15_MINUTES
         }
 
-        return analysis
+        analysis = get_analysis(pair, interval_map[timeframe])
+
+        rsi = analysis.indicators["RSI"]
+        ema50 = analysis.indicators["EMA50"]
+        ema200 = analysis.indicators.get("EMA200", ema50)
+        price = analysis.indicators["close"]
+        high = analysis.indicators.get("high", price)
+        low = analysis.indicators.get("low", price)
+
+        # 🔥 Higher timeframe
+        htf = get_analysis(pair, Interval.INTERVAL_15_MINUTES)
+        htf_rsi = htf.indicators["RSI"]
+
+        signal = "HOLD"
+        warning = ""
+        entry_price = None
+        confidence = 0
+
+        # ================= TREND =================
+        if ema50 > ema200:
+            trend = "UPTREND"
+        elif ema50 < ema200:
+            trend = "DOWNTREND"
+        else:
+            trend = "SIDEWAYS"
+
+        # ================= NO TRADE ZONE =================
+        if 45 < rsi < 55:
+            return "🟡 HOLD\n⚠️ Market is ranging"
+
+        # ================= BUY =================
+        if trend == "UPTREND" and rsi < 35 and htf_rsi < 40:
+            signal = "BUY"
+            entry_price = price
+            confidence = 80
+
+        # ================= SELL =================
+        elif trend == "DOWNTREND" and rsi > 65 and htf_rsi > 60:
+            signal = "SELL"
+            entry_price = price
+            confidence = 80
+
+        # ================= EXTRA FILTERS =================
+        if signal != "HOLD":
+            if abs(price - high) < 0.0003:
+                warning = "⚠️ Near resistance"
+                confidence -= 10
+
+            if abs(price - low) < 0.0003:
+                warning = "⚠️ Near support"
+                confidence -= 10
+
+            if trend == "UPTREND" and htf_rsi > 70:
+                warning = "⚠️ HTF overbought"
+                confidence -= 15
+
+            if trend == "DOWNTREND" and htf_rsi < 30:
+                warning = "⚠️ HTF oversold"
+                confidence -= 15
+
+        # ================= TIME =================
+        now = datetime.utcnow()
+        seconds = now.second
+        remaining = 60 - seconds
+
+        # ================= RESULT =================
+        if signal == "HOLD":
+            return f"""
+🟡 HOLD
+📊 Trend: {trend}
+⏳ Next Candle: {remaining}s
+"""
+
+        return f"""
+📊 SIGNAL: {signal}
+💰 Entry: {entry_price}
+🔥 Confidence: {confidence}%
+📊 Trend: {trend}
+⏳ Next Candle: {remaining}s
+{warning}
+"""
 
     except Exception as e:
-        return {"error": str(e)}
+        return f"Error: {str(e)}"
 
 
-# ================= ROUTES =================
-@app.route('/')
-def index():
-    return render_template('index.html')
+# ================= HANDLERS =================
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ALLOWED_USERS:
+        await update.message.reply_text("⛔ Access Denied")
+        return
+
+    keyboard = [["🚀 Start Bot"]]
+    await update.message.reply_text("Click below:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
 
 
-@app.route('/upload', methods=['POST'])
-def upload_file():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file part"}), 400
+async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ALLOWED_USERS:
+        return
 
-    file = request.files['file']
-
-    if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
-
-    if file and file.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
-        try:
-            filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
-
-            image = Image.open(filepath)
-            result = analyze_chart(image)
-
-            return jsonify({
-                "status": "success",
-                "analysis": result
-            })
-
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-
-    return jsonify({"error": "Invalid file type"}), 400
+    if update.message.text == "🚀 Start Bot":
+        await update.message.reply_text("🚀 Sigma AI Bot", reply_markup=main_menu())
 
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080, debug=True)
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+
+    if user_id not in ALLOWED_USERS:
+        await query.answer("⛔ Access Denied", show_alert=True)
+        return
+
+    await query.answer()
+    data = query.data
+
+    if data == "forex":
+        await query.edit_message_text("Select Pair:", reply_markup=forex_menu())
+
+    elif data in PAIRS:
+        await query.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu(data))
+
+    elif "_" in data:
+        pair, tf = data.split("_")
+        result = generate_signal(pair, tf)
+        await query.edit_message_text(result)
+
+    elif data == "back_main":
+        await query.edit_message_text("🚀 Sigma AI Bot", reply_markup=main_menu())
+
+    elif data == "back_forex":
+        await query.edit_message_text("Select Pair:", reply_markup=forex_menu())
+
+# ================= RUN =================
+
+app = ApplicationBuilder().token(TOKEN).build()
+
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT, start_button))
+app.add_handler(CallbackQueryHandler(button_handler))
+
+print("Bot running...")
+app.run_polling()
+        
