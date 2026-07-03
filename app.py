@@ -121,7 +121,7 @@ def ai_score(patterns, candle_score, zones, trend):
     if trend == "UPTREND":
         score += 2
     elif trend == "DOWNTREND":
-        score += 2
+        score -= 2
 
     if len(zones) >= 2 and len(zones) <= 6:
         score += 2  # good structure
@@ -150,11 +150,15 @@ def analyze_chart(image):
     # Decision
     signal = "NO SIGNAL"
 
-    if strength == "STRONG":
-        if trend == "UPTREND":
-            signal = "BUY"
-        elif trend == "DOWNTREND":
-            signal = "SELL"
+if strength == "STRONG":
+    if trend == "UPTREND" and "Strong Bullish Pressure" in patterns:
+        signal = "BUY"
+
+    elif trend == "DOWNTREND" and "Strong Bearish Pressure" in patterns:
+        signal = "SELL"
+
+    if trend == "SIDEWAYS":
+    signal = "NO SIGNAL"
 
     return {
         "patterns": patterns,
