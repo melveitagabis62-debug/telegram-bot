@@ -7,9 +7,17 @@ from tradingview_ta import TA_Handler, Interval
 
 app = Flask(__name__)
 
-@app.route("/")
-def home():
-    return render_template("index.html")
+@app.route("/analyze", methods=["POST"])
+def analyze():
+    file = request.files.get("file")
+
+    if not file:
+        return jsonify({"result": "No file uploaded"})
+
+    # TEMP TEST RESPONSE (to confirm it works)
+    return jsonify({
+        "result": "✅ Image received! AI analysis coming next 🚀"
+    })
 
 # ================= IMAGE ANALYSIS =================
 def detect_candles(image):
