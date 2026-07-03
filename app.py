@@ -11,6 +11,10 @@ app = Flask(__name__)
 def analyze():
     file = request.files.get("file")
 
+@app.route("/")
+def home():
+    return render_template("index.html")
+
     if not file:
         return jsonify({"result": "No file uploaded"})
 
