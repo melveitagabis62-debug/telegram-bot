@@ -10,23 +10,29 @@ app = Flask(__name__)
 @app.route("/upload", methods=["POST"])
 def upload():
     try:
-        file = request.files["file"]
+        file = request.files.get("file")
 
-        image = Image.open(file.stream)
+        if not file:
+            return jsonify({"error": "No file uploaded"})
 
-        # TEMP: skip forex API (this is crashing your server)
-        result = {
+        # TEMP working response
+        return jsonify({
             "signal": "BUY",
             "image_trend": "UPTREND",
             "data_trend": "UPTREND",
             "candle_bias": "BULLISH",
-            "rsi": 45.5
-        }
-
-        return jsonify(result)
+            "rsi": 48.2
+        })
 
     except Exception as e:
-        return jsonify({"error": str(e)})
+        return jsonify({
+            "signal": "ERROR",
+            "image_trend": "ERROR",
+            "data_trend": "ERROR",
+            "candle_bias": "ERROR",
+            "rsi": 0,
+            "error": str(e)
+        })
         
 # ================= IMAGE ANALYSIS =================
 def detect_candles(image):
