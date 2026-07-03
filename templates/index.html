@@ -75,47 +75,38 @@
     <div id="result" class="card" style="display:none;"></div>
 
 <script>
-document.getElementById("uploadForm").addEventListener("submit", async function(e) {
-    e.preventDefault();
-
+async function uploadImage() {
     const fileInput = document.getElementById("fileInput");
-    const file = fileInput.files[0];
 
-    if (!file) {
-        alert("Please select a file");
+    if (!fileInput.files.length) {
+        alert("Select a file first");
         return;
     }
 
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", fileInput.files[0]);
 
     try {
-        const response = await fetch("/upload", {   // ✅ FIXED ROUTE
+        const res = await fetch("/upload", {
             method: "POST",
             body: formData
         });
 
-        const data = await response.json();
+        const data = await res.json();
 
-        const resultDiv = document.getElementById("result");
-        resultDiv.style.display = "block";
+        console.log(data); // 👈 DEBUG
 
-        resultDiv.innerHTML = `
-            <div class="signal ${data.signal === 'BUY' ? 'buy' : 'sell'}">
-                ${data.signal}
-            </div>
-
-            <p><b>Trend (Image):</b> ${data.image_trend}</p>
-            <p><b>Trend (Data):</b> ${data.data_trend}</p>
-            <p><b>Candle Bias:</b> ${data.candle_bias}</p>
-            <p><b>RSI:</b> ${data.rsi}</p>
-        `;
+        document.getElementById("signal").innerText = data.signal || "ERROR";
+        document.getElementById("imageTrend").innerText = data.image_trend || "N/A";
+        document.getElementById("dataTrend").innerText = data.data_trend || "N/A";
+        document.getElementById("candleBias").innerText = data.candle_bias || "N/A";
+        document.getElementById("rsi").innerText = data.rsi ?? "N/A";
 
     } catch (err) {
-        alert("Error connecting to server");
+        alert("Server error");
         console.error(err);
     }
-});
+}
 </script>
 
 </body>
