@@ -67,6 +67,21 @@ def get_analysis(symbol, interval):
     )
     return handler.get_analysis()
 
+def get_snr_zone(analysis):
+    price = analysis.indicators["close"]
+
+    highs = analysis.indicators.get("high", price)
+    lows = analysis.indicators.get("low", price)
+
+    # Simple zone approximation (since TradingView TA is limited)
+    resistance = highs
+    support = lows
+
+    near_resistance = abs(price - resistance) < (price * 0.001)
+    near_support = abs(price - support) < (price * 0.001)
+
+    return near_support, near_resistance
+
 
 def generate_signal(pair, timeframe):
     try:
@@ -86,7 +101,8 @@ def generate_signal(pair, timeframe):
         price = analysis.indicators["close"]
         high = analysis.indicators.get("high", price)
         low = analysis.indicators.get("low", price)
-
+        near_support, near_resistance = get_snr_zone(analysis)
+        
         # 🔥 Higher timeframe
         htf = get_analysis(pair, Interval.INTERVAL_15_MINUTES)
         htf_rsi = htf.indicators["RSI"]
@@ -110,33 +126,32 @@ def generate_signal(pair, timeframe):
 
         # ================= BUY =================
         if trend == "UPTREND" and rsi < 35 and htf_rsi < 40:
-            signal = "BUY"
-            entry_price = price
-            confidence = 80
+            if near_support:
+                signal = "BUY"
+                entry_price = price
+                confidence = 90
+            else:
+                confidence = 70
+                signal = "BUY"
 
-        # ================= SELL =================
+# ================= SELL =================
         elif trend == "DOWNTREND" and rsi > 65 and htf_rsi > 60:
-            signal = "SELL"
-            entry_price = price
-            confidence = 80
+            if near_resistance:
+                signal = "SELL"
+                entry_price = price
+                confidence = 90
+            else:
+                confidence = 70
+                signal = "SELL"
 
         # ================= EXTRA FILTERS =================
-        if signal != "HOLD":
-            if abs(price - high) < 0.0003:
-                warning = "⚠️ Near resistance"
-                confidence -= 10
+        if signal == "BUY" and not near_support:
+            warning = "⚠️ Not at strong support"
+            confidence -= 10
 
-            if abs(price - low) < 0.0003:
-                warning = "⚠️ Near support"
-                confidence -= 10
-
-            if trend == "UPTREND" and htf_rsi > 70:
-                warning = "⚠️ HTF overbought"
-                confidence -= 15
-
-            if trend == "DOWNTREND" and htf_rsi < 30:
-                warning = "⚠️ HTF oversold"
-                confidence -= 15
+        if signal == "SELL" and not near_resistance:
+            warning = "⚠️ Not at strong resistance"
+            confidence -= 10
 
         # ================= TIME =================
         now = datetime.utcnow()
