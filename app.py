@@ -7,6 +7,10 @@ from tradingview_ta import TA_Handler, Interval
 
 app = Flask(__name__)
 
+@app.route("/")
+def home():
+    return render_template("index.html")
+
 # ================= IMAGE ANALYSIS =================
 def detect_candles(image):
     img = np.array(image.convert("RGB").resize((300, 300)))
