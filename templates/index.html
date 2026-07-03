@@ -52,63 +52,28 @@
     <div id="result" class="card" style="display:none;"></div>
 
 <script>
-document.getElementById('uploadForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
+async function analyzeImage() {
+    const fileInput = document.querySelector('input[type="file"]');
+    const file = fileInput.files[0];
+
+    if (!file) {
+        alert("Please select a file");
+        return;
+    }
 
     const formData = new FormData();
-    formData.append('file', document.getElementById('fileInput').files[0]);
+    formData.append("file", file);
 
-    const div = document.getElementById('result');
+    const response = await fetch("/analyze", {
+        method: "POST",
+        body: formData
+    });
 
-    try {
-        const res = await fetch('/upload', {
-            method: 'POST',
-            body: formData
-        });
+    const data = await response.json();
 
-        // 🔥 THIS LINE FIXES YOUR BUG
-        if (!res.ok) {
-            const text = await res.text();
-            throw new Error("Server error: " + text);
-        }
-
-        const data = await res.json();
-
-        console.log("API RESPONSE:", data); // DEBUG
-
-        if (data.error) {
-            div.innerHTML = `<span style="color:red;">Error: ${data.error}</span>`;
-            div.style.display = "block";
-            return;
-        }
-
-        let signalUI = '';
-
-if (data.signal === "BUY") {
-    signalUI = '<div class="signal buy">🟢 BUY</div>';
-} 
-else if (data.signal === "SELL") {
-    signalUI = '<div class="signal sell">🔴 SELL</div>';
-} 
-else {
-    signalUI = '<div class="signal" style="background:#555;">⚪ NO SIGNAL</div>';
-            }
-        
-            <p><strong>Trend:</strong> ${data.trend}</p>
-            <p><strong>Strength:</strong> ${data.strength}</p>
-            <p><strong>Patterns:</strong> ${data.patterns.join(", ")}</p>
-            <p><strong>Zones:</strong> ${data.zones_detected}</p>
-        `;
-
-        div.style.display = "block";
-
-    } catch (err) {
-        console.error(err);
-        div.innerHTML = `<span style="color:red;">Error: ${err.message}</span>`;
-        div.style.display = "block";
-    }
-});
-    </script>
+    document.getElementById("result").innerText = data.result;
+}
+</script>
     
 </body>
 </html>
