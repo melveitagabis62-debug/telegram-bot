@@ -21,40 +21,50 @@ def preprocess_image(image):
     enhanced = enhanced.filter(ImageFilter.SHARPEN)
     return enhanced
 
-# ================= CANDLE DETECTION =================
+# ================= IMPROVED CANDLE DETECTION =================
 def detect_candles(image):
     img = np.array(image.convert("RGB").resize((300, 300)))
-    
-    green = np.sum((img[:,:,1] > 150) & (img[:,:,0] < 100))
-    red = np.sum((img[:,:,0] > 150) & (img[:,:,1] < 100))
+
+    green_pixels = (img[:,:,1] > 140) & (img[:,:,0] < 120)
+    red_pixels   = (img[:,:,0] > 140) & (img[:,:,1] < 120)
+
+    green = np.sum(green_pixels)
+    red   = np.sum(red_pixels)
 
     patterns = []
+    strength = 0
 
-    # Engulfing logic (simple approximation)
-    if green > red * 1.5:
-        patterns.append("Bullish Engulfing")
+    total = green + red + 1
 
-    elif red > green * 1.5:
-        patterns.append("Bearish Engulfing")
+    green_ratio = green / total
+    red_ratio   = red / total
 
-    # Doji detection (low body vs wick idea)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 50, 150)
+    # 🔥 stronger logic
+    if green_ratio > 0.6:
+        patterns.append("Strong Bullish Pressure")
+        strength += 2
+    elif red_ratio > 0.6:
+        patterns.append("Strong Bearish Pressure")
+        strength += 2
 
-    if np.mean(edges) < 20:
-        patterns.append("Doji")
+    elif green_ratio > 0.52:
+        patterns.append("Bullish Bias")
+        strength += 1
+    elif red_ratio > 0.52:
+        patterns.append("Bearish Bias")
+        strength += 1
 
-    return patterns
+    return patterns, strength
 
-
-# ================= SUPPORT / RESISTANCE =================
+# ================= IMPROVED SUPPORT / RESISTANCE =================
 def detect_support_resistance(image):
     img = np.array(image.convert("RGB").resize((300, 300)))
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     edges = cv2.Canny(gray, 50, 150)
 
-    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 100, minLineLength=50, maxLineGap=10)
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 120,
+                            minLineLength=80, maxLineGap=5)
 
     zones = []
 
@@ -62,21 +72,22 @@ def detect_support_resistance(image):
         for line in lines:
             x1, y1, x2, y2 = line[0]
 
-            # horizontal lines = support/resistance
-            if abs(y1 - y2) < 10:
+            if abs(y1 - y2) < 5:  # tighter filter
                 zones.append(y1)
+
+    # 🔥 reduce noise
+    zones = list(set([round(z, -1) for z in zones]))
 
     return zones
 
-
-# ================= TREND DETECTION =================
+# ================= IMPROVED TREND =================
 def detect_trend(image):
     img = np.array(image.convert("RGB").resize((300, 300)))
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     edges = cv2.Canny(gray, 50, 150)
 
-    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 100)
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 120)
 
     slopes = []
 
@@ -84,47 +95,41 @@ def detect_trend(image):
         for line in lines:
             x1, y1, x2, y2 = line[0]
 
-            if x2 - x1 != 0:
+            if abs(x2 - x1) > 10:
                 slope = (y2 - y1) / (x2 - x1)
                 slopes.append(slope)
 
-    if len(slopes) == 0:
+    if len(slopes) < 5:
         return "SIDEWAYS"
 
     avg = np.mean(slopes)
 
-    if avg > 0.2:
+    # 🔥 less sensitive
+    if avg > 0.3:
         return "UPTREND"
-    elif avg < -0.2:
+    elif avg < -0.3:
         return "DOWNTREND"
     else:
         return "SIDEWAYS"
 
-
-# ================= AI SCORING =================
-def ai_score(patterns, zones, trend):
+# ================= IMPROVED AI SCORE =================
+def ai_score(patterns, candle_score, zones, trend):
     score = 0
 
-    if "Bullish Engulfing" in patterns:
-        score += 3
-
-    if "Bearish Engulfing" in patterns:
-        score += 3
-
-    if "Doji" in patterns:
-        score -= 1
-
-    if len(zones) > 5:
-        score += 2
+    score += candle_score
 
     if trend == "UPTREND":
         score += 2
-
-    if trend == "DOWNTREND":
+    elif trend == "DOWNTREND":
         score += 2
 
-    # Final signal
-    if score >= 6:
+    if len(zones) >= 2 and len(zones) <= 6:
+        score += 2  # good structure
+    elif len(zones) > 10:
+        score -= 1  # too noisy
+
+    # 🔥 smarter result
+    if score >= 5:
         return "STRONG"
     elif score >= 3:
         return "MEDIUM"
@@ -136,11 +141,11 @@ def ai_score(patterns, zones, trend):
 def analyze_chart(image):
     processed = preprocess_image(image)
 
-    patterns = detect_candles(processed)
+    patterns, candle_score = detect_candles(processed)
     zones = detect_support_resistance(processed)
     trend = detect_trend(processed)
 
-    strength = ai_score(patterns, zones, trend)
+    strength = ai_score(patterns, candle_score, zones, trend)
 
     # Decision
     signal = "NO SIGNAL"
