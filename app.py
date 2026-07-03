@@ -158,7 +158,7 @@ if strength == "STRONG":
         signal = "SELL"
 
     if trend == "SIDEWAYS":
-    signal = "NO SIGNAL"
+        signal = "NO SIGNAL"
 
     return {
         "patterns": patterns,
