@@ -1,146 +1,114 @@
-from flask import Flask, request, jsonify, render_template
-from PIL import Image
+from flask import Flask, request, render_template, jsonify
+import os
+from PIL import Image, ImageEnhance, ImageFilter, ImageStat
+import pytesseract
 import numpy as np
-import cv2
-
-from tradingview_ta import TA_Handler, Interval
+import datetime
 
 app = Flask(__name__)
 
-@app.route("/upload", methods=["POST"])
-def upload():
+UPLOAD_FOLDER = 'uploads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
+def preprocess_image(image):
+    gray = image.convert('L')
+    enhancer = ImageEnhance.Contrast(gray)
+    enhanced = enhancer.enhance(2.5)
+    enhanced = enhanced.filter(ImageFilter.SHARPEN)
+    return enhanced
+
+def analyze_chart(image):
     try:
-        file = request.files.get("file")
-
-        if not file:
-            return jsonify({"error": "No file uploaded"})
-
-        # TEMP working response
-        return jsonify({
-            "signal": "BUY",
-            "image_trend": "UPTREND",
-            "data_trend": "UPTREND",
-            "candle_bias": "BULLISH",
-            "rsi": 48.2
-        })
-
-    except Exception as e:
-        return jsonify({
-            "signal": "ERROR",
-            "image_trend": "ERROR",
-            "data_trend": "ERROR",
-            "candle_bias": "ERROR",
-            "rsi": 0,
-            "error": str(e)
-        })
+        processed = preprocess_image(image)
+        text = pytesseract.image_to_string(processed, config=r'--oem 3 --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,%+- ')
+        lower = text.lower().strip()
         
-# ================= IMAGE ANALYSIS =================
-def detect_candles(image):
-    img = np.array(image.convert("RGB").resize((300, 300)))
+        score = 0
+        reasons = []
+        
+        bullish_words = ['bull', 'uptrend', 'breakout', 'support', 'buy', 'long', 'bounce', 'reversal up']
+        bearish_words = ['bear', 'downtrend', 'breakdown', 'resistance', 'sell', 'short', 'drop', 'reversal down']
+        
+        if any(w in lower for w in bullish_words):
+            score += 3
+            reasons.append("Strong bullish keywords")
+        if any(w in lower for w in bearish_words):
+            score -= 3
+            reasons.append("Strong bearish keywords")
+        
+        # Advanced heuristics
+        if "rsi" in lower and ("oversold" in lower or "30" in lower):
+            score += 2
+            reasons.append("RSI oversold")
+        if "rsi" in lower and ("overbought" in lower or "70" in lower):
+            score -= 2
+            reasons.append("RSI overbought")
+        
+        if "ma" in lower or "moving average" in lower:
+            if "cross" in lower and "up" in lower:
+                score += 2
+        
+        # Final decision
+        if score >= 4:
+            trend = "Strong Bullish"
+            confidence = "High"
+        elif score >= 2:
+            trend = "Bullish"
+            confidence = "Medium-High"
+        elif score <= -4:
+            trend = "Strong Bearish"
+            confidence = "High"
+        elif score <= -2:
+            trend = "Bearish"
+            confidence = "Medium-High"
+        else:
+            trend = "Neutral / Sideways"
+            confidence = "Medium"
+        
+        analysis = {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "extracted_text": text.strip()[:800],
+            "trend": trend,
+            "confidence": confidence,
+            "score": score,
+            "reasons": reasons
+        }
+        
+        return analysis
+    except Exception as e:
+        return {"error": str(e)}
 
-    green = np.sum((img[:,:,1] > 140) & (img[:,:,0] < 120))
-    red   = np.sum((img[:,:,0] > 140) & (img[:,:,1] < 120))
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-    total = green + red + 1
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    
+    if file and file.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+        try:
+            filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+            image = Image.open(filepath)
+            result = analyze_chart(image)
+            
+            return jsonify({
+                "status": "success",
+                "filename": filename,
+                "analysis": result
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    return jsonify({"error": "Invalid file type"}), 400
 
-    if green / total > 0.55:
-        return "BULLISH"
-    elif red / total > 0.55:
-        return "BEARISH"
-    else:
-        return "NEUTRAL"
-
-
-def detect_trend(image):
-    img = np.array(image.convert("RGB").resize((300, 300)))
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    edges = cv2.Canny(gray, 50, 150)
-    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 100)
-
-    slopes = []
-
-    if lines is not None:
-        for line in lines:
-            x1,y1,x2,y2 = line[0]
-            if abs(x2-x1) > 10:
-                slopes.append((y2-y1)/(x2-x1))
-
-    if len(slopes) < 5:
-        return "SIDEWAYS"
-
-    avg = np.mean(slopes)
-
-    if avg > 0.3:
-        return "UPTREND"
-    elif avg < -0.3:
-        return "DOWNTREND"
-    else:
-        return "SIDEWAYS"
-
-# ================= FOREX DATA =================
-def get_forex(symbol):
-    handler = TA_Handler(
-        symbol=symbol,
-        screener="forex",
-        exchange="FX_IDC",
-        interval=Interval.INTERVAL_5_MINUTES
-    )
-    return handler.get_analysis()
-
-# ================= MAIN AI =================
-def analyze_chart(image, symbol="EURUSD"):
-    candle = detect_candles(image)
-    trend_img = detect_trend(image)
-
-    data = get_forex(symbol)
-
-    rsi = data.indicators["RSI"]
-    ema = data.indicators["EMA10"]
-    price = data.indicators["close"]
-
-    trend_data = "UPTREND" if price > ema else "DOWNTREND"
-
-    signal = "NO SIGNAL"
-
-    # ================= HYBRID LOGIC =================
-    if (
-        candle == "BULLISH" and
-        trend_img == "UPTREND" and
-        trend_data == "UPTREND" and
-        rsi < 40
-    ):
-        signal = "BUY"
-
-    elif (
-        candle == "BEARISH" and
-        trend_img == "DOWNTREND" and
-        trend_data == "DOWNTREND" and
-        rsi > 60
-    ):
-        signal = "SELL"
-
-    return {
-        "signal": signal,
-        "image_trend": trend_img,
-        "data_trend": trend_data,
-        "candle_bias": candle,
-        "rsi": round(rsi, 2)
-    }
-
-# ================= ROUTE =================
-@app.route("/upload", methods=["POST"])
-def upload():
-    file = request.files["file"]
-
-    symbol = request.form.get("symbol", "EURUSD")
-
-    image = Image.open(file.stream)
-
-    result = analyze_chart(image, symbol)
-
-    return jsonify(result)
-
-# ================= START =================
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080, debug=True)
