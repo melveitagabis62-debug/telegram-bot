@@ -198,6 +198,12 @@ def generate_signal(pair, timeframe):
             warning = "⚠️ Not at strong resistance"
             confidence -= 10
 
+        if signal == "BUY" and rsi > 50:
+            confidence -= 15
+
+        if signal == "SELL" and rsi < 50:
+            confidence -= 15
+
         # ================= TIME =================
         now = datetime.utcnow()
         seconds = now.second
