@@ -16,7 +16,7 @@ PAIRS = [
 SYMBOL = [
     "BTCUSDT",
 ]
-INTERVAL = "1m"
+INTERVAL = "5m"
 LIMIT = 100
 
 # ================= MENU =================
