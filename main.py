@@ -4,6 +4,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 from tradingview_ta import TA_Handler, Interval
 import os
 import time
+import requests
 
 TOKEN = os.getenv("TOKEN")
 ALLOWED_USERS = [6351041498]
@@ -19,6 +20,28 @@ PAIRS = [
 ]
 
 # ================= MENU =================
+
+def get_ohlc(symbol, interval="5m", limit=100):
+    url = "https://api.binance.com/api/v3/klines"
+
+    params = {
+        "symbol": symbol,
+        "interval": interval,
+        "limit": limit
+    }
+
+    data = requests.get(url, params=params).json()
+
+    candles = []
+    for c in data:
+        candles.append({
+            "open": float(c[1]),
+            "high": float(c[2]),
+            "low": float(c[3]),
+            "close": float(c[4])
+        })
+
+    return candles
 
 def main_menu():
     keyboard = [
@@ -82,6 +105,23 @@ def get_snr_zone(analysis):
 
     return near_support, near_resistance
 
+def detect_liquidity_sweep(candles, support, resistance):
+    last = candles[-1]
+    prev = candles[-2]
+
+    sweep_down = prev["low"] < support and last["close"] > support
+    sweep_up = prev["high"] > resistance and last["close"] < resistance
+
+    return sweep_down, sweep_up
+
+def get_snr_zones(candles):
+    highs = [c["high"] for c in candles]
+    lows = [c["low"] for c in candles]
+
+    resistance = max(highs[-20:])
+    support = min(lows[-20:])
+
+    return support, resistance
 
 def generate_signal(pair, timeframe):
     try:
@@ -95,6 +135,16 @@ def generate_signal(pair, timeframe):
 
         analysis = get_analysis(pair, interval_map[timeframe])
 
+        # Convert pair to Binance format
+        symbol = pair + "T"
+
+        candles = get_ohlc(symbol, "5m", 100)
+
+        support, resistance = get_snr_zones(candles)
+        sweep_down, sweep_up = detect_liquidity_sweep(candles, support, resistance)
+
+        price = candles[-1]["close"]
+        
         rsi = analysis.indicators["RSI"]
         ema50 = analysis.indicators["EMA50"]
         ema200 = analysis.indicators.get("EMA200", ema50)
@@ -125,24 +175,19 @@ def generate_signal(pair, timeframe):
             return "🟡 HOLD\n⚠️ Market is ranging"
 
         # ================= BUY =================
-        if trend == "UPTREND" and rsi < 35 and htf_rsi < 40:
-            if near_support:
-                signal = "BUY"
-                entry_price = price
-                confidence = 90
-            else:
-                confidence = 70
-                signal = "BUY"
+            signal = "HOLD"
+            confidence = 0
+            entry_price = price
+   
+       # 🔥 SMART MONEY BUY
+        if sweep_down:
+            signal = "BUY"
+            confidence = 90
 
-# ================= SELL =================
-        elif trend == "DOWNTREND" and rsi > 65 and htf_rsi > 60:
-            if near_resistance:
-                signal = "SELL"
-                entry_price = price
-                confidence = 90
-            else:
-                confidence = 70
-                signal = "SELL"
+        # 🔥 SMART MONEY SELL
+        elif sweep_up:
+            signal = "SELL"
+            confidence = 90
 
         # ================= EXTRA FILTERS =================
         if signal == "BUY" and not near_support:
