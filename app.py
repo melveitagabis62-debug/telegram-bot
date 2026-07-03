@@ -160,7 +160,8 @@ if strength == "STRONG":
     if trend == "SIDEWAYS":
         signal = "NO SIGNAL"
 
-    return {
+    return 
+        {
         "patterns": patterns,
         "zones_detected": len(zones),
         "trend": trend,
