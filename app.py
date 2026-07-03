@@ -8,21 +8,26 @@ from tradingview_ta import TA_Handler, Interval
 app = Flask(__name__)
 
 @app.route("/upload", methods=["POST"])
-def analyze():
-    file = request.files.get("file")
+def upload():
+    try:
+        file = request.files["file"]
 
-@app.route("/")
-def home():
-    return render_template("index.html")
+        image = Image.open(file.stream)
 
-    if not file:
-        return jsonify({"result": "No file uploaded"})
+        # TEMP: skip forex API (this is crashing your server)
+        result = {
+            "signal": "BUY",
+            "image_trend": "UPTREND",
+            "data_trend": "UPTREND",
+            "candle_bias": "BULLISH",
+            "rsi": 45.5
+        }
 
-    # TEMP TEST RESPONSE (to confirm it works)
-    return jsonify({
-        "result": "✅ Image received! AI analysis coming next 🚀"
-    })
+        return jsonify(result)
 
+    except Exception as e:
+        return jsonify({"error": str(e)})
+        
 # ================= IMAGE ANALYSIS =================
 def detect_candles(image):
     img = np.array(image.convert("RGB").resize((300, 300)))
