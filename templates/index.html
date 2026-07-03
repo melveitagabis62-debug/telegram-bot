@@ -82,15 +82,18 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
             return;
         }
 
-        const isBullish = data.trend.toLowerCase().includes("up");
+        let signalUI = '';
 
-        div.innerHTML = `
-            <h2>${data.signal}</h2>
-
-            ${isBullish 
-                ? '<div class="signal buy">🟢 BUY</div>' 
-                : '<div class="signal sell">🔴 SELL</div>'}
-
+if (data.signal === "BUY") {
+    signalUI = '<div class="signal buy">🟢 BUY</div>';
+} 
+else if (data.signal === "SELL") {
+    signalUI = '<div class="signal sell">🔴 SELL</div>';
+} 
+else {
+    signalUI = '<div class="signal" style="background:#555;">⚪ NO SIGNAL</div>';
+            }
+        
             <p><strong>Trend:</strong> ${data.trend}</p>
             <p><strong>Strength:</strong> ${data.strength}</p>
             <p><strong>Patterns:</strong> ${data.patterns.join(", ")}</p>
