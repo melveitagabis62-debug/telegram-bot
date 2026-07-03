@@ -13,6 +13,12 @@ PAIRS = [
     "USDCAD", "USDCHF", "NZDUSD"
 ]
 
+SYMBOL = [
+    "BTCUSDT",
+]
+INTERVAL = "1m"
+LIMIT = 100
+
 # ================= MENU =================
 
 def main_menu():
