@@ -1,7 +1,6 @@
 from flask import Flask, request, render_template, jsonify
 import os
 from PIL import Image, ImageEnhance, ImageFilter
-import pytesseract
 import numpy as np
 import datetime
 import cv2
