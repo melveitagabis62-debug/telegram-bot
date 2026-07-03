@@ -65,7 +65,7 @@ async function analyzeImage() {
     const formData = new FormData();
     formData.append("file", file);
 
-    const response = await fetch("/analyze", {
+    const response = await fetch("/analyze_image", {
         method: "POST",
         body: formData
     });
