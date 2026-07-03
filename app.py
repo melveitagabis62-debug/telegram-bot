@@ -16,16 +16,14 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 # ================= IMAGE PREPROCESS =================
 def preprocess_image(image):
-    gray = image.convert('L')
-    enhancer = ImageEnhance.Contrast(gray)
+    enhancer = ImageEnhance.Contrast(image)
     enhanced = enhancer.enhance(2.0)
     enhanced = enhanced.filter(ImageFilter.SHARPEN)
     return enhanced
 
-
 # ================= CANDLE DETECTION =================
 def detect_candles(image):
-    img = np.array(image.resize((300, 300)))
+    img = np.array(image.convert("RGB").resize((300, 300)))
     
     green = np.sum((img[:,:,1] > 150) & (img[:,:,0] < 100))
     red = np.sum((img[:,:,0] > 150) & (img[:,:,1] < 100))
@@ -51,7 +49,7 @@ def detect_candles(image):
 
 # ================= SUPPORT / RESISTANCE =================
 def detect_support_resistance(image):
-    img = np.array(image.resize((300, 300)))
+    img = np.array(image.convert("RGB").resize((300, 300)))
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     edges = cv2.Canny(gray, 50, 150)
@@ -73,7 +71,7 @@ def detect_support_resistance(image):
 
 # ================= TREND DETECTION =================
 def detect_trend(image):
-    img = np.array(image.resize((300, 300)))
+    img = np.array(image.convert("RGB").resize((300, 300)))
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     edges = cv2.Canny(gray, 50, 150)
