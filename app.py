@@ -14,6 +14,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
+
 # ================= IMAGE PREPROCESS =================
 def preprocess_image(image):
     gray = image.convert('L')
@@ -22,191 +23,172 @@ def preprocess_image(image):
     enhanced = enhanced.filter(ImageFilter.SHARPEN)
     return enhanced
 
+
 # ================= CANDLE DETECTION =================
 def detect_candles(image):
-    img = np.array(image.resize((200, 200)))
-
+    img = np.array(image.resize((300, 300)))
+    
     green = np.sum((img[:,:,1] > 150) & (img[:,:,0] < 100))
     red = np.sum((img[:,:,0] > 150) & (img[:,:,1] < 100))
 
-    total = green + red + 1
-    green_ratio = green / total
-    red_ratio = red / total
+    patterns = []
 
-    pattern = None
-    score = 0
+    # Engulfing logic (simple approximation)
+    if green > red * 1.5:
+        patterns.append("Bullish Engulfing")
 
-    if green_ratio > 0.65:
-        pattern = "Bullish Engulfing Zone"
-        score += 2
-    elif red_ratio > 0.65:
-        pattern = "Bearish Engulfing Zone"
-        score -= 2
+    elif red > green * 1.5:
+        patterns.append("Bearish Engulfing")
 
-    if 0.45 < green_ratio < 0.55:
-        pattern = "Doji / Indecision"
-        score -= 1
-
-    return pattern, score
-
-# ================= SUPPORT / RESISTANCE =================
-def detect_zones(image):
-    gray = cv2.cvtColor(np.array(image), cv2.COLOR_BGR2GRAY)
+    # Doji detection (low body vs wick idea)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     edges = cv2.Canny(gray, 50, 150)
 
-    horizontal = np.sum(edges, axis=1)
-    peaks = np.where(horizontal > np.mean(horizontal) * 1.5)[0]
+    if np.mean(edges) < 20:
+        patterns.append("Doji")
 
-    score = 0
-    zone_type = None
+    return patterns
 
-    if len(peaks) > 5:
-        zone_type = "Strong S/R Zone"
-        score += 2
-    elif len(peaks) > 2:
-        zone_type = "Weak S/R Zone"
-        score += 1
 
-    return zone_type, score
+# ================= SUPPORT / RESISTANCE =================
+def detect_support_resistance(image):
+    img = np.array(image.resize((300, 300)))
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    edges = cv2.Canny(gray, 50, 150)
+
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 100, minLineLength=50, maxLineGap=10)
+
+    zones = []
+
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+
+            # horizontal lines = support/resistance
+            if abs(y1 - y2) < 10:
+                zones.append(y1)
+
+    return zones
+
 
 # ================= TREND DETECTION =================
 def detect_trend(image):
-    gray = cv2.cvtColor(np.array(image), cv2.COLOR_BGR2GRAY)
+    img = np.array(image.resize((300, 300)))
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
     edges = cv2.Canny(gray, 50, 150)
 
-    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 50, minLineLength=50, maxLineGap=10)
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 100)
 
-    slope_score = 0
-    trend = None
+    slopes = []
 
     if lines is not None:
-        slopes = []
-        for line in lines[:20]:
+        for line in lines:
             x1, y1, x2, y2 = line[0]
+
             if x2 - x1 != 0:
                 slope = (y2 - y1) / (x2 - x1)
                 slopes.append(slope)
 
-        if slopes:
-            avg = np.mean(slopes)
+    if len(slopes) == 0:
+        return "SIDEWAYS"
 
-            if avg < -0.2:
-                trend = "Uptrend"
-                slope_score += 2
-            elif avg > 0.2:
-                trend = "Downtrend"
-                slope_score -= 2
+    avg = np.mean(slopes)
 
-    return trend, slope_score
+    if avg > 0.2:
+        return "UPTREND"
+    elif avg < -0.2:
+        return "DOWNTREND"
+    else:
+        return "SIDEWAYS"
+
+
+# ================= AI SCORING =================
+def ai_score(patterns, zones, trend):
+    score = 0
+
+    if "Bullish Engulfing" in patterns:
+        score += 3
+
+    if "Bearish Engulfing" in patterns:
+        score += 3
+
+    if "Doji" in patterns:
+        score -= 1
+
+    if len(zones) > 5:
+        score += 2
+
+    if trend == "UPTREND":
+        score += 2
+
+    if trend == "DOWNTREND":
+        score += 2
+
+    # Final signal
+    if score >= 6:
+        return "STRONG"
+    elif score >= 3:
+        return "MEDIUM"
+    else:
+        return "WEAK"
+
 
 # ================= MAIN ANALYSIS =================
 def analyze_chart(image):
-    try:
-        processed = preprocess_image(image)
-        text = pytesseract.image_to_string(processed, config=r'--oem 3 --psm 6')
-        lower_text = text.lower()
+    processed = preprocess_image(image)
 
-        score = 0
-        reasons = []
+    patterns = detect_candles(processed)
+    zones = detect_support_resistance(processed)
+    trend = detect_trend(processed)
 
-        # TEXT SIGNALS
-        if any(w in lower_text for w in ['buy', 'bull', 'support']):
-            score += 2
-            reasons.append("Bullish text")
+    strength = ai_score(patterns, zones, trend)
 
-        if any(w in lower_text for w in ['sell', 'bear', 'resistance']):
-            score -= 2
-            reasons.append("Bearish text")
+    # Decision
+    signal = "NO SIGNAL"
 
-        # CANDLES
-        candle_pattern, candle_score = detect_candles(image)
-        score += candle_score
-        if candle_pattern:
-            reasons.append(candle_pattern)
+    if strength == "STRONG":
+        if trend == "UPTREND":
+            signal = "BUY"
+        elif trend == "DOWNTREND":
+            signal = "SELL"
 
-        # SUPPORT / RESISTANCE
-        zone, zone_score = detect_zones(image)
-        score += zone_score
-        if zone:
-            reasons.append(zone)
+    return {
+        "patterns": patterns,
+        "zones_detected": len(zones),
+        "trend": trend,
+        "strength": strength,
+        "signal": signal
+    }
 
-        # TREND
-        trend, trend_score = detect_trend(image)
-        score += trend_score
-        if trend:
-            reasons.append(trend)
-
-        # RSI TEXT
-        if "rsi" in lower_text:
-            if "30" in lower_text:
-                score += 2
-                reasons.append("RSI Oversold")
-            elif "70" in lower_text:
-                score -= 2
-                reasons.append("RSI Overbought")
-
-        # FINAL DECISION
-        if score >= 6:
-            trend_out = "STRONG BUY"
-            confidence = "High"
-        elif score >= 3:
-            trend_out = "BUY"
-            confidence = "Medium"
-        elif score <= -6:
-            trend_out = "STRONG SELL"
-            confidence = "High"
-        elif score <= -3:
-            trend_out = "SELL"
-            confidence = "Medium"
-        else:
-            trend_out = "NEUTRAL"
-            confidence = "Low"
-
-        return {
-            "timestamp": datetime.datetime.now().isoformat(),
-            "extracted_text": text[:400],
-            "trend": trend_out,
-            "confidence": confidence,
-            "score": score,
-            "reasons": reasons[:6]
-        }
-
-    except Exception as e:
-        return {"error": str(e)}
 
 # ================= ROUTES =================
 @app.route('/')
-def index():
+def home():
     return render_template('index.html')
 
+
 @app.route('/upload', methods=['POST'])
-def upload_file():
+def upload():
     if 'file' not in request.files:
-        return jsonify({"error": "No file part"}), 400
+        return jsonify({"error": "No file uploaded"})
 
     file = request.files['file']
+
     if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
+        return jsonify({"error": "Empty filename"})
 
-    if file and file.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
-        try:
-            filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+    file.save(filepath)
 
-            image = Image.open(filepath)
-            result = analyze_chart(image)
+    image = Image.open(filepath)
 
-            return jsonify({
-                "status": "success",
-                "filename": filename,
-                "analysis": result
-            })
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+    result = analyze_chart(image)
 
-    return jsonify({"error": "Invalid file type"}), 400
+    return jsonify(result)
+
 
 # ================= RUN =================
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    app.run(debug=True)
