@@ -52,43 +52,60 @@
     <div id="result" class="card" style="display:none;"></div>
 
 <script>
-    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
     const formData = new FormData();
     formData.append('file', document.getElementById('fileInput').files[0]);
 
-    const res = await fetch('/upload', {
-        method: 'POST',
-        body: formData
-    });
-
-    const data = await res.json();
     const div = document.getElementById('result');
 
-    if (data.error) {
-        div.innerHTML = `<span style="color:red;">Error: ${data.error}</span>`;
+    try {
+        const res = await fetch('/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        // 🔥 THIS LINE FIXES YOUR BUG
+        if (!res.ok) {
+            const text = await res.text();
+            throw new Error("Server error: " + text);
+        }
+
+        const data = await res.json();
+
+        console.log("API RESPONSE:", data); // DEBUG
+
+        if (data.error) {
+            div.innerHTML = `<span style="color:red;">Error: ${data.error}</span>`;
+            div.style.display = "block";
+            return;
+        }
+
+        const isBullish = data.trend.toLowerCase().includes("up");
+
+        div.innerHTML = `
+            <h2>${data.signal}</h2>
+
+            ${isBullish 
+                ? '<div class="signal buy">🟢 BUY</div>' 
+                : '<div class="signal sell">🔴 SELL</div>'}
+
+            <p><strong>Trend:</strong> ${data.trend}</p>
+            <p><strong>Strength:</strong> ${data.strength}</p>
+            <p><strong>Patterns:</strong> ${data.patterns.join(", ")}</p>
+            <p><strong>Zones:</strong> ${data.zones_detected}</p>
+        `;
+
         div.style.display = "block";
-        return;
+
+    } catch (err) {
+        console.error(err);
+        div.innerHTML = `<span style="color:red;">Error: ${err.message}</span>`;
+        div.style.display = "block";
     }
-
-    const isBullish = data.trend.toLowerCase().includes("up");
-
-    div.innerHTML = `
-        <h2>${data.signal}</h2>
-
-        ${isBullish 
-            ? '<div class="signal buy">🟢 BUY</div>' 
-            : '<div class="signal sell">🔴 SELL</div>'}
-
-        <p><strong>Trend:</strong> ${data.trend}</p>
-        <p><strong>Strength:</strong> ${data.strength}</p>
-        <p><strong>Patterns:</strong> ${data.patterns.join(", ")}</p>
-        <p><strong>Zones:</strong> ${data.zones_detected}</p>
-    `;
-
-    div.style.display = "block";
 });
-        </script>
+    </script>
+    
 </body>
 </html>
