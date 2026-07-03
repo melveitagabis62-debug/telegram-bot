@@ -7,7 +7,7 @@ from tradingview_ta import TA_Handler, Interval
 
 app = Flask(__name__)
 
-@app.route("/analyze", methods=["POST"])
+@app.route("/upload", methods=["POST"])
 def analyze():
     file = request.files.get("file")
 
