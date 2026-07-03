@@ -51,43 +51,44 @@
 
     <div id="result" class="card" style="display:none;"></div>
 
-    <script>
-        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData();
-            formData.append('file', document.getElementById('fileInput').files[0]);
+<script>
+    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
 
-            const res = await fetch('/upload', { method: 'POST', body: formData });
-            const data = await res.json();
-            const div = document.getElementById('result');
+    const formData = new FormData();
+    formData.append('file', document.getElementById('fileInput').files[0]);
 
-            if (data.status === "success") {
-                const a = data.analysis;
-                const isBullish = a.trend.toLowerCase().includes("bull");
-                const score = a.score || 0;
-                const percent = Math.min(Math.max(30 + score * 15, 30), 85);
+    const res = await fetch('/upload', {
+        method: 'POST',
+        body: formData
+    });
 
-                div.innerHTML = `
-                    <h2 style="margin-top:0;">${a.trend}</h2>
-                    ${isBullish ? 
-                        `<div class="signal buy">🟢 STRONG BUY</div>` : 
-                        `<div class="signal sell">🔴 SELL SIGNAL</div>`}
-                    
-                    <p><strong>Favourability:</strong> ${percent}%</p>
-                    <div class="favorability"><div class="bar" style="width:${percent}%"></div></div>
-                    
-                    <p><strong>Confidence:</strong> ${a.confidence}</p>
-                    ${a.reasons && a.reasons.length ? `<p><strong>Reasoning:</strong> ${a.reasons.join(' • ')}</p>` : ''}
-                    
-                    **Summary:**
-Raw Extracted Text
-                        <p style="font-size:0.85em; opacity:0.75;">${a.extracted_text || 'No text detected'}</p>
-                `;
-            } else {
-                div.innerHTML = `<p style="color:#ff5252">Error: ${data.error}</p>`;
-            }
-            div.style.display = 'block';
-        });
-    </script>
+    const data = await res.json();
+    const div = document.getElementById('result');
+
+    if (data.error) {
+        div.innerHTML = `<span style="color:red;">Error: ${data.error}</span>`;
+        div.style.display = "block";
+        return;
+    }
+
+    const isBullish = data.trend.toLowerCase().includes("up");
+
+    div.innerHTML = `
+        <h2>${data.signal}</h2>
+
+        ${isBullish 
+            ? '<div class="signal buy">🟢 BUY</div>' 
+            : '<div class="signal sell">🔴 SELL</div>'}
+
+        <p><strong>Trend:</strong> ${data.trend}</p>
+        <p><strong>Strength:</strong> ${data.strength}</p>
+        <p><strong>Patterns:</strong> ${data.patterns.join(", ")}</p>
+        <p><strong>Zones:</strong> ${data.zones_detected}</p>
+    `;
+
+    div.style.display = "block";
+});
+        </script>
 </body>
 </html>
