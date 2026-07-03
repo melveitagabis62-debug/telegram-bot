@@ -63,26 +63,36 @@
 
             if (data.status === "success") {
                 const a = data.analysis;
-                const isBullish = a.trend.toLowerCase().includes("bull");
-                const score = a.score || 0;
-                const percent = Math.min(Math.max(30 + score * 15, 30), 85);
+                const a = data.analysis;
+
+                const signal = a.signal || "NO TRADE";
+
+                let signalClass = "sell";
+            
+            if (signal.includes("BUY")) signalClass = "buy";
+
+            if (signal === "NO TRADE") signalClass = "";
 
                 div.innerHTML = `
-                    <h2 style="margin-top:0;">${a.trend}</h2>
-                    ${isBullish ? 
-                        `<div class="signal buy">🟢 STRONG BUY</div>` : 
-                        `<div class="signal sell">🔴 SELL SIGNAL</div>`}
-                    
-                    <p><strong>Favourability:</strong> ${percent}%</p>
-                    <div class="favorability"><div class="bar" style="width:${percent}%"></div></div>
-                    
-                    <p><strong>Confidence:</strong> ${a.confidence}</p>
-                    ${a.reasons && a.reasons.length ? `<p><strong>Reasoning:</strong> ${a.reasons.join(' • ')}</p>` : ''}
-                    
-                    **Summary:**
-Raw Extracted Text
-                        <p style="font-size:0.85em; opacity:0.75;">${a.extracted_text || 'No text detected'}</p>
-                `;
+                     <h2>${signal}</h2>
+    
+                     <div class="signal ${signalClass}">
+                    ${signal}
+                </div>
+
+                     <p><strong>Confidence:</strong> ${a.confidence}</p>
+                     <p><strong>Score:</strong> ${a.score}</p>
+
+                   ${a.reasons && a.reasons.length ? 
+                    `<p><strong>Reasons:</strong> ${a.reasons.join(' • ')}</p>` 
+          : ''}
+
+                     <p><strong>Detected Prices:</strong> ${a.numbers_detected ? a.numbers_detected.join(', ') : ''}</p>
+
+                     <p style="font-size:0.8em;opacity:0.6;">
+                     ${a.raw_text || 'No text detected'}
+                     </p>
+            `;
             } else {
                 div.innerHTML = `<p style="color:#ff5252">Error: ${data.error}</p>`;
             }
