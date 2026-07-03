@@ -3,16 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chart Screener</title>
+    <title>AI Chart Screener</title>
+
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #0a0a0f; color: #e0e0e0; margin:0; padding:15px; }
-        .header { text-align:center; margin-bottom:20px; }
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 15px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
         .card {
             background: #16161f;
             border-radius: 16px;
             padding: 20px;
             margin-bottom: 20px;
         }
+
         button {
             background: linear-gradient(135deg, #00d4aa, #00b894);
             color: black;
@@ -23,38 +36,49 @@
             border-radius: 12px;
             width: 100%;
         }
-        .signal { font-size: 32px; font-weight: bold; text-align:center; padding: 15px; border-radius: 12px; margin:15px 0; }
-        .buy { background: #00c853; color: black; }
-        .sell { background: #f44336; color: white; }
-        .favorability {
-            height: 12px;
-            background: #333;
-            border-radius: 999px;
-            overflow: hidden;
-            margin: 10px 0;
+
+        .signal {
+            font-size: 32px;
+            font-weight: bold;
+            text-align: center;
+            padding: 15px;
+            border-radius: 12px;
+            margin: 15px 0;
         }
-        .bar { height: 100%; background: linear-gradient(to right, #00c853, #ffd700); }
+
+        .buy {
+            background: #00c853;
+            color: black;
+        }
+
+        .sell {
+            background: #f44336;
+            color: white;
+        }
     </style>
 </head>
+
 <body>
+
     <div class="header">
         <h1>📊 AI Chart Screener</h1>
         <p>Professional Signal Analyzer</p>
     </div>
 
     <div class="card">
-        <form id="uploadForm" enctype="multipart/form-data">
+        <form id="uploadForm">
             <input type="file" id="fileInput" accept="image/*" style="margin-bottom:15px;" required>
             <button type="submit">Analyze Screenshot</button>
         </form>
     </div>
 
     <div id="result" class="card" style="display:none;"></div>
-    <div id="result" style="margin-top:20px; color:white;"></div>
 
 <script>
-async function analyzeImage() {
-    const fileInput = document.querySelector('input[type="file"]');
+document.getElementById("uploadForm").addEventListener("submit", async function(e) {
+    e.preventDefault();
+
+    const fileInput = document.getElementById("fileInput");
     const file = fileInput.files[0];
 
     if (!file) {
@@ -65,16 +89,34 @@ async function analyzeImage() {
     const formData = new FormData();
     formData.append("file", file);
 
-    const response = await fetch("/analyze_image", {
-        method: "POST",
-        body: formData
-    });
+    try {
+        const response = await fetch("/upload", {   // ✅ FIXED ROUTE
+            method: "POST",
+            body: formData
+        });
 
-    const data = await response.json();
+        const data = await response.json();
 
-    document.getElementById("result").innerText = data.result;
-}
+        const resultDiv = document.getElementById("result");
+        resultDiv.style.display = "block";
+
+        resultDiv.innerHTML = `
+            <div class="signal ${data.signal === 'BUY' ? 'buy' : 'sell'}">
+                ${data.signal}
+            </div>
+
+            <p><b>Trend (Image):</b> ${data.image_trend}</p>
+            <p><b>Trend (Data):</b> ${data.data_trend}</p>
+            <p><b>Candle Bias:</b> ${data.candle_bias}</p>
+            <p><b>RSI:</b> ${data.rsi}</p>
+        `;
+
+    } catch (err) {
+        alert("Error connecting to server");
+        console.error(err);
+    }
+});
 </script>
-    
+
 </body>
 </html>
