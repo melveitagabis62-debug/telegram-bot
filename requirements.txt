@@ -1,9 +1,2 @@
-flask==3.0.3
-pillow==10.4.0
-numpy==1.26.4
-matplotlib==3.9.2
-pytesseract
-opencv-python-headless
-gunicorn==23.0.0
-requests==2.32.3
-tradingview-ta
+python-telegram-bot[job-queue]
+tradingview_ta
