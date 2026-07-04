@@ -56,17 +56,24 @@ def detect_sr(img):
     support = 0
     resistance = 0
 
-    if lines is not None:
-        for line in lines:
-            x1,y1,x2,y2 = line[0]
-            if abs(y1 - y2) < 10:
-                if y1 > img.shape[0] * 0.6:
-                    support += 1
-                elif y1 < img.shape[0] * 0.4:
-                    resistance += 1
+    if lines is None:
+        return support, resistance
+
+    for line in lines:
+        try:
+            x1, y1, x2, y2 = line[0]
+        except:
+            continue  # skip broken lines
+
+        # Horizontal lines only
+        if abs(y1 - y2) < 10:
+            if y1 > img.shape[0] * 0.6:
+                support += 1
+            elif y1 < img.shape[0] * 0.4:
+                resistance += 1
 
     return support, resistance
-
+    
 # ==============================
 # 🧠 MULTI-TF (FAKE CONFIRMATION)
 # ==============================
