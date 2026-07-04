@@ -4,7 +4,7 @@ import numpy as np
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("TOKEN")
 
 # ==============================
 # 📊 IMAGE ANALYSIS ENGINE
