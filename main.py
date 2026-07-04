@@ -109,7 +109,7 @@ def analyze_chart(path):
     g = np.sum(green > 0)
     r = np.sum(red > 0)
 
-    confidence = 50
+    confidence = 55
 
     # ==============================
     # 📊 DECISION ENGINE
@@ -120,7 +120,7 @@ def analyze_chart(path):
         confidence += 20
 
     if doji:
-        confidence -= 10
+        confidence -= 5
 
     if support > resistance:
         confidence += 10
@@ -142,7 +142,7 @@ def analyze_chart(path):
         signal = "NO TRADE ❌"
         confidence -= 20
 
-    confidence = max(0, min(95, confidence))
+confidence = max(40, min(95, confidence))
 
     return signal, confidence
 
@@ -154,13 +154,18 @@ def allow_signal(signal, confidence):
 
     now = time.time()
 
-    # keep last 1 hour signals
-    last_signals = [t for t in last_signals if now - t < 3600]
+    # keep last 30 min instead of 1 hour
+    last_signals = [t for t in last_signals if now - t < 1800]
 
-    if len(last_signals) >= 10:
+    # limit signals (max 6 per 30 mins)
+    if len(last_signals) >= 6:
         return False
 
-    if confidence < 60:
+    # smarter confidence filter
+    if signal == "NO TRADE ❌":
+        return False
+
+    if confidence < 52:   # 🔥 lowered from 60 → 52
         return False
 
     last_signals.append(now)
