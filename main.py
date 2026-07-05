@@ -91,7 +91,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         import re
         match = re.search(r"Score:\s*(\d+)", result)
 
-            score = int(match.group(1)) if match else 0
+        score = int(match.group(1)) if match else 0
 
             # SMART FILTER (NOT TOO STRICT)
         if score < 3:
