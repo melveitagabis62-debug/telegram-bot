@@ -1,175 +1,88 @@
 import os
-import cv2
-import numpy as np
-import time
+import base64
+import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
-TOKEN = os.getenv("TOKEN")
-
-last_signals = []
-
-# ==============================
-# 📊 CANDLE + PATTERN ENGINE
-# ==============================
-def detect_candles(img):
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-
-    # Green mask
-    green = cv2.inRange(hsv, (35, 50, 50), (85, 255, 255))
-    # Red mask
-    red1 = cv2.inRange(hsv, (0, 50, 50), (10, 255, 255))
-    red2 = cv2.inRange(hsv, (170, 50, 50), (180, 255, 255))
-    red = red1 + red2
-
-    return green, red
-
-def detect_engulfing(green, red):
-    g = np.sum(green > 0)
-    r = np.sum(red > 0)
-
-    if g > r * 1.5:
-        return "BULLISH_ENGULFING"
-    elif r > g * 1.5:
-        return "BEARISH_ENGULFING"
-    return None
-
-def detect_doji(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 30, 100)
-    edge_count = np.sum(edges > 0)
-
-    if 15000 < edge_count < 30000:
-        return True
-    return False
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 
 # ==============================
-# 📈 SUPPORT / RESISTANCE
+# 🧠 SEND IMAGE TO AI
 # ==============================
-def detect_sr(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+def analyze_with_ai(image_path):
+    with open(image_path, "rb") as f:
+        image_bytes = f.read()
 
-    edges = cv2.Canny(blur, 50, 150)
-    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 100, minLineLength=100, maxLineGap=10)
+    base64_image = base64.b64encode(image_bytes).decode("utf-8")
 
-    support = 0
-    resistance = 0
+    headers = {
+        "Authorization": f"Bearer {OPENAI_KEY}",
+        "Content-Type": "application/json"
+    }
 
-    if lines is None:
-        return support, resistance
+    prompt = """
+You are a professional forex trader.
 
-    for line in lines:
-        try:
-            x1, y1, x2, y2 = line[0]
-        except:
-            continue  # skip broken lines
+Analyze this chart screenshot and return STRICT JSON:
 
-        # Horizontal lines only
-        if abs(y1 - y2) < 10:
-            if y1 > img.shape[0] * 0.6:
-                support += 1
-            elif y1 < img.shape[0] * 0.4:
-                resistance += 1
+{
+ "trend": "bullish or bearish",
+ "entry": "price or zone",
+ "stop_loss": "price",
+ "take_profit_1": "price",
+ "take_profit_2": "price",
+ "confidence": "0-100",
+ "reason": "short explanation"
+}
 
-    return support, resistance
-    
-# ==============================
-# 🧠 MULTI-TF (FAKE CONFIRMATION)
-# ==============================
-def multi_tf_logic(trend_strength):
-    if trend_strength > 60000:
-        return "STRONG"
-    elif trend_strength > 30000:
-        return "MEDIUM"
-    return "WEAK"
+Rules:
+- Be realistic (not always high confidence)
+- Use price zones visible
+- If unclear → return "no trade"
+"""
 
-# ==============================
-# 🎯 MAIN ANALYZER
-# ==============================
-def analyze_chart(path):
-    img = cv2.imread(path)
+    payload = {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}"
+                        }
+                    }
+                ]
+            }
+        ],
+        "max_tokens": 500
+    }
 
-    if img is None:
-        return "ERROR ❌", 0
+    response = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers=headers,
+        json=payload
+    )
 
-    img = cv2.resize(img, (800, 600))
-
-    green, red = detect_candles(img)
-    engulfing = detect_engulfing(green, red)
-    doji = detect_doji(img)
-    support, resistance = detect_sr(img)
-
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 50, 150)
-    trend_strength = np.sum(edges > 0)
-
-    tf = multi_tf_logic(trend_strength)
-
-    g = np.sum(green > 0)
-    r = np.sum(red > 0)
-
-    confidence = 55
-
-    # ==============================
-    # 📊 DECISION ENGINE
-    # ==============================
-    if engulfing == "BULLISH_ENGULFING":
-        confidence += 20
-    if engulfing == "BEARISH_ENGULFING":
-        confidence += 20
-
-    if doji:
-        confidence -= 5
-
-    if support > resistance:
-        confidence += 10
-    elif resistance > support:
-        confidence += 10
-
-    if tf == "STRONG":
-        confidence += 15
-    elif tf == "WEAK":
-        confidence -= 10
-
-    if g > r * 1.2:
-        signal = "BUY 📈"
-        confidence += 10
-    elif r > g * 1.2:
-        signal = "SELL 📉"
-        confidence += 10
-    else:
-        signal = "NO TRADE ❌"
-        confidence -= 20
-
-confidence = max(40, min(95, confidence))
-
-    return signal, confidence
+    return response.json()
 
 # ==============================
-# 🚫 SIGNAL FILTER (ANTI-SPAM)
+# 🧾 FORMAT RESULT
 # ==============================
-def allow_signal(signal, confidence):
-    global last_signals
+def format_signal(data):
+    try:
+        content = data["choices"][0]["message"]["content"]
 
-    now = time.time()
+        return f"""
+📊 AI TRADE SETUP
 
-    # keep last 30 min instead of 1 hour
-    last_signals = [t for t in last_signals if now - t < 1800]
-
-    # limit signals (max 6 per 30 mins)
-    if len(last_signals) >= 6:
-        return False
-
-    # smarter confidence filter
-    if signal == "NO TRADE ❌":
-        return False
-
-    if confidence < 52:   # 🔥 lowered from 60 → 52
-        return False
-
-    last_signals.append(now)
-    return True
+{content}
+"""
+    except:
+        return "❌ Failed to analyze image"
 
 # ==============================
 # 🤖 TELEGRAM HANDLER
@@ -181,21 +94,18 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     path = "chart.jpg"
     await file.download_to_drive(path)
 
-    signal, confidence = analyze_chart(path)
+    await update.message.reply_text("🧠 Analyzing with AI...")
 
-    if allow_signal(signal, confidence):
-        await update.message.reply_text(
-            f"📊 {signal}\n"
-            f"🔥 Confidence: {confidence}%"
-        )
-    else:
-        await update.message.reply_text("⏳ Filtered (Low quality / Too many signals)")
+    result = analyze_with_ai(path)
+    message = format_signal(result)
+
+    await update.message.reply_text(message)
 
 # ==============================
-# ▶️ RUN
+# ▶️ RUN BOT
 # ==============================
-app = ApplicationBuilder().token(TOKEN).build()
+app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-print("🔥 ULTRA SNIPER BOT RUNNING...")
+print("🚀 AI PRO BOT RUNNING...")
 app.run_polling()
