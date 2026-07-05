@@ -89,7 +89,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Extract score
         import re
-            match = re.search(r"Score:\s*(\d+)", result)
+        match = re.search(r"Score:\s*(\d+)", result)
 
             score = int(match.group(1)) if match else 0
 
