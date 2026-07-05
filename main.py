@@ -96,16 +96,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # SMART FILTER (NOT TOO STRICT)
         if score < 3:
     
-        await update.message.reply_text("⏳ No setup (too weak)")
-            return
+            await update.message.reply_text("⏳ No setup (too weak)")
+                return
 
             # Allow weak trades but mark them
         if 3 <= score <= 4:
-        await update.message.reply_text(f"⚠️ WEAK SETUP\n\n{result}")
-            return
+            await update.message.reply_text(f"⚠️ WEAK SETUP\n\n{result}")
+                return
 
          # Strong trades
-        await update.message.reply_text(f"🔥 STRONG SETUP\n\n{result}")
+            await update.message.reply_text(f"🔥 STRONG SETUP\n\n{result}")
 
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
