@@ -117,7 +117,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # START BOT
 # ==============================
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
