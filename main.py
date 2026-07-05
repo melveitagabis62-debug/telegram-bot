@@ -98,13 +98,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
             await update.message.reply_text("⏳ No setup (too weak)")
                 
-                return
+            return
 
             # Allow weak trades but mark them
         if 3 <= score <= 4:
             await update.message.reply_text(f"⚠️ WEAK SETUP\n\n{result}")
                 
-                return
+            return
 
          # Strong trades
             await update.message.reply_text(f"🔥 STRONG SETUP\n\n{result}")
