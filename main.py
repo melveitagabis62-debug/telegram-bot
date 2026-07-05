@@ -7,7 +7,7 @@ from openai import OpenAI
 # ==============================
 # CONFIG
 # ==============================
-BOT_TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv("TOKEN")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 
 client = OpenAI(api_key=OPENAI_KEY)
