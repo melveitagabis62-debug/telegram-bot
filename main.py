@@ -82,7 +82,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_path = file.file_path
 
         # Convert to real URL
-        image_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+        image_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
 
         # AI Analysis
         result = analyze_image(image_url)
