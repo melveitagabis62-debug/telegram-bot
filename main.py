@@ -17,6 +17,7 @@ logging.basicConfig(level=logging.INFO)
 # ==============================
 # AI ANALYSIS FUNCTION
 # ==============================
+
 def analyze_image(image_url):
     response = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -27,22 +28,29 @@ def analyze_image(image_url):
                     {
                         "type": "text",
                         "text": """
-You are an elite ICT sniper trader.
+You are an elite sniper trader.
 
-Analyze the trading chart using:
-- Market trend
-- Support & Resistance zones
-- Engulfing & Doji candlestick patterns
-- Fake breakout detection
+Analyze this chart and SCORE it.
 
-STRICT RULES:
-- Only give 1 clear signal
-- Maximum 3–10 signals per day quality
-- Avoid low-quality trades
+Scoring system:
+- Trend alignment (2 pts)
+- Support/Resistance reaction (2 pts)
+- Engulfing pattern (2 pts)
+- Doji rejection (1 pt)
+- Strong momentum (1 pt)
+- Clean structure (1 pt)
+
+Max score = 9
+
+RULES:
+- Score >=5 → VALID TRADE
+- Score 3-4 → WEAK TRADE
+- Score <3 → NO TRADE
 
 Return EXACT format:
 
 Signal: BUY / SELL / NO TRADE
+Score: X/9
 Confidence: XX%
 Entry: price
 Take Profit: price
@@ -79,12 +87,25 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # AI Analysis
         result = analyze_image(image_url)
 
-        # OPTIONAL FILTER (only block VERY weak signals)
-        if "NO TRADE" in result:
-            await update.message.reply_text("⏳ No valid setup (filtered)")
+        # Extract score
+        import re
+            match = re.search(r"Score:\s*(\d+)", result)
+
+            score = int(match.group(1)) if match else 0
+
+            # SMART FILTER (NOT TOO STRICT)
+        if score < 3:
+    
+        await update.message.reply_text("⏳ No setup (too weak)")
             return
 
-        await update.message.reply_text(f"📊 AI TRADE SETUP\n\n{result}")
+            # Allow weak trades but mark them
+        if 3 <= score <= 4:
+        await update.message.reply_text(f"⚠️ WEAK SETUP\n\n{result}")
+            return
+
+         # Strong trades
+        await update.message.reply_text(f"🔥 STRONG SETUP\n\n{result}")
 
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
