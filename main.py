@@ -1,127 +1,105 @@
-import os
 import logging
-from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
-from openai import OpenAI
+import requests
+import pandas as pd
 
-# ==============================
-# CONFIG
-# ==============================
-TOKEN = os.getenv("TOKEN")
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
-client = OpenAI(api_key=OPENAI_KEY)
+from config import TELEGRAM_TOKEN, API_URL
+from strategy import generate_signal
 
 logging.basicConfig(level=logging.INFO)
 
-# ==============================
-# AI ANALYSIS FUNCTION
-# ==============================
+user_settings = {}
 
-def analyze_image(image_url):
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": """
-You are an elite sniper trader.
+# ================= DATA FETCH =================
+def get_market_data(symbol="BTCUSDT", interval="1m", limit=50):
+    params = {
+        "symbol": symbol,
+        "interval": interval,
+        "limit": limit
+    }
 
-Analyze this chart and SCORE it.
+    res = requests.get(API_URL, params=params)
+    data = res.json()
 
-Scoring system:
-- Trend alignment (2 pts)
-- Support/Resistance reaction (2 pts)
-- Engulfing pattern (2 pts)
-- Doji rejection (1 pt)
-- Strong momentum (1 pt)
-- Clean structure (1 pt)
+    df = pd.DataFrame(data, columns=[
+        "time","open","high","low","close","volume",
+        "close_time","qav","trades","tbbav","tbqav","ignore"
+    ])
 
-Max score = 9
+    df = df.astype(float)
+    return df
 
-RULES:
-- Score >=5 → VALID TRADE
-- Score 3-4 → WEAK TRADE
-- Score <3 → NO TRADE
+# ================= COMMANDS =================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        ["EURUSDT", "GBPUSDT"],
+        ["BTCUSDT"]
+    ]
 
-Return EXACT format:
-
-Signal: BUY / SELL / NO TRADE
-Score: X/9
-Confidence: XX%
-Entry: price
-Take Profit: price
-Stop Loss: price
-Reason: short explanation
-"""
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": image_url}
-                    }
-                ]
-            }
-        ]
+    await update.message.reply_text(
+        "📊 Select Pair:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
-    return response.choices[0].message.content
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    user_id = update.message.chat_id
 
-# ==============================
-# TELEGRAM HANDLER
-# ==============================
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        await update.message.reply_text("🧠 Analyzing with AI...")
+    if user_id not in user_settings:
+        user_settings[user_id] = {}
 
-        photo = update.message.photo[-1]
-        file = await context.bot.get_file(photo.file_id)
+    # Step 1: Pair
+    if "pair" not in user_settings[user_id]:
+        user_settings[user_id]["pair"] = text
 
-        file_path = file.file_path
+        keyboard = [["1m", "5m", "15m"]]
+        await update.message.reply_text(
+            "⏱ Select Timeframe:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
 
-        # Convert to real URL
-        image_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+    # Step 2: Timeframe
+    if "timeframe" not in user_settings[user_id]:
+        user_settings[user_id]["timeframe"] = text
 
-        # AI Analysis
-        result = analyze_image(image_url)
+        await update.message.reply_text("🔍 Analyzing market...")
 
-        # Extract score
-        import re
-        match = re.search(r"Score:\s*(\d+)", result)
+        pair = user_settings[user_id]["pair"]
+        tf = user_settings[user_id]["timeframe"]
 
-        score = int(match.group(1)) if match else 0
+        df = get_market_data(pair, tf)
 
-            # SMART FILTER (NOT TOO STRICT)
-        if score < 3:
-    
-            await update.message.reply_text("⏳ No setup (too weak)")
-                
-            return
+        signal, support, resistance = generate_signal(df)
 
-            # Allow weak trades but mark them
-        if 3 <= score <= 4:
-            await update.message.reply_text(f"⚠️ WEAK SETUP\n\n{result}")
-                
-            return
+        if signal:
+            await update.message.reply_text(
+                f"🚨 SIGNAL: {signal}\n"
+                f"Pair: {pair}\n"
+                f"TF: {tf}\n"
+                f"Support: {support:.5f}\n"
+                f"Resistance: {resistance:.5f}"
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ No Signal\n"
+                f"Support: {support:.5f}\n"
+                f"Resistance: {resistance:.5f}"
+            )
 
-         # Strong trades
-            await update.message.reply_text(f"🔥 STRONG SETUP\n\n{result}")
+        # Reset for next use
+        user_settings[user_id] = {}
 
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {e}")
-        print("ERROR:", e)
-
-# ==============================
-# START BOT
-# ==============================
+# ================= RUN =================
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
-    print("🚀 AI SNIPER BOT RUNNING...")
+    print("🤖 Bot running...")
     app.run_polling()
 
 if __name__ == "__main__":
