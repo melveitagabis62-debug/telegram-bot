@@ -33,6 +33,12 @@ def get_market_data(symbol="BTCUSDT", interval="1m", limit=50):
 
 # ================= COMMANDS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.chat_id
+
+    user_settings[user_id] = {
+        "step": "pair"
+    }
+
     keyboard = [
         ["EURUSDT", "GBPUSDT"],
         ["BTCUSDT"]
@@ -48,49 +54,72 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.chat_id
 
     if user_id not in user_settings:
-        user_settings[user_id] = {}
+        user_settings[user_id] = {
+            "step": "pair"
+        }
 
-    # Step 1: Pair
-    if "pair" not in user_settings[user_id]:
+    step = user_settings[user_id]["step"]
+
+    # ================= STEP 1: SELECT PAIR =================
+    if step == "pair":
         user_settings[user_id]["pair"] = text
+        user_settings[user_id]["step"] = "timeframe"
 
         keyboard = [["1m", "5m", "15m"]]
+
         await update.message.reply_text(
             "⏱ Select Timeframe:",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         )
         return
 
-    # Step 2: Timeframe
-    if "timeframe" not in user_settings[user_id]:
+    # ================= STEP 2: SELECT TIMEFRAME =================
+    elif step == "timeframe":
         user_settings[user_id]["timeframe"] = text
+        user_settings[user_id]["step"] = "done"
 
         await update.message.reply_text("🔍 Analyzing market...")
 
         pair = user_settings[user_id]["pair"]
         tf = user_settings[user_id]["timeframe"]
 
-        df = get_market_data(pair, tf)
+        try:
+            df = get_market_data(pair, tf)
+            signal, support, resistance = generate_signal(df)
 
-        signal, support, resistance = generate_signal(df)
+            if signal:
+                await update.message.reply_text(
+                    f"🚨 SIGNAL: {signal}\n"
+                    f"Pair: {pair}\n"
+                    f"TF: {tf}\n"
+                    f"Support: {support:.5f}\n"
+                    f"Resistance: {resistance:.5f}"
+                )
+            else:
+                await update.message.reply_text(
+                    f"❌ No Signal\n"
+                    f"Support: {support:.5f}\n"
+                    f"Resistance: {resistance:.5f}"
+                )
 
-        if signal:
-            await update.message.reply_text(
-                f"🚨 SIGNAL: {signal}\n"
-                f"Pair: {pair}\n"
-                f"TF: {tf}\n"
-                f"Support: {support:.5f}\n"
-                f"Resistance: {resistance:.5f}"
-            )
-        else:
-            await update.message.reply_text(
-                f"❌ No Signal\n"
-                f"Support: {support:.5f}\n"
-                f"Resistance: {resistance:.5f}"
-            )
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {e}")
 
-        # Reset for next use
-        user_settings[user_id] = {}
+        # RESET FLOW
+        user_settings[user_id] = {
+            "step": "pair"
+        }
+
+        keyboard = [
+            ["EURUSDT", "GBPUSDT"],
+            ["BTCUSDT"]
+        ]
+
+        await update.message.reply_text(
+            "📊 Select Pair:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+
 
 # ================= RUN =================
 def main():
