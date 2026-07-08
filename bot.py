@@ -1,5 +1,6 @@
 import os
 import asyncio
+import urllib.parse
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import pandas as pd
@@ -91,22 +92,23 @@ async def run_otc_analysis(chat_id, message_id):
     tf_seconds = USER_STATE[chat_id]['timeframe_seconds']
     tf_text = USER_STATE[chat_id]['timeframe_text']
     
-    clean_ssid = PO_SSID.strip().replace('"', '').replace("'", "") if PO_SSID else None
-    
-    if not clean_ssid:
+    if not PO_SSID:
         await bot.send_message(chat_id, "❌ Error: `PO_SSID` variable is missing or blank on Railway!")
         return
 
-    [span_4](start_span)try:
-        # Correct initialization without forbidden 'headers' argument
-        client = AsyncPocketOptionClient(clean_ssid, is_demo=True)[span_4](end_span)
-        await client.[span_5](start_span)connect()[span_5](end_span)
+    # Automatically decodes %3A -> : and %22 -> " so you don't have to clean it manually!
+    clean_ssid = urllib.parse.unquote(PO_SSID.strip().replace('"', '').replace("'", ""))
+
+    try:
+        # Initializing clean client with absolutely NO 'headers' parameter
+        client = AsyncPocketOptionClient(clean_ssid, is_demo=True)
+        await client.connect()
         
-        df = await client.[span_6](start_span)get_candles_dataframe(pair, tf_seconds, count=50)[span_6](end_span)
-        await client.[span_7](start_span)disconnect()[span_7](end_span)
+        df = await client.get_candles_dataframe(pair, tf_seconds, count=50)
+        await client.disconnect()
         
         if df is None or df.empty:
-            await bot.send_message(chat_id, "⚠️ Server replied with an empty stream. Check if your PO_SSID cookie has expired.")
+            await bot.send_message(chat_id, "⚠️ Server replied with an empty stream. Your session token might have expired. Try re-copying it!")
             return
 
         rsi = ta.momentum.RSIIndicator(close=df['close'], window=7).rsi()
