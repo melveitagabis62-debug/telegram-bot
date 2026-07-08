@@ -1,69 +1,146 @@
 import os
-import time
-import requests
+import asyncio
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import pandas as pd
-import ta  # Technical Analysis library
+import ta
+from pocketoptionapi_async import AsyncPocketOptionClient
 
-# Environment Variables (Set these in Railway)
+# Environment Variables from Railway
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+PO_SSID = os.getenv("PO_SSID")
 
-# Configuration
-SYMBOL = "BTC/USDT"  # You can change this to standard assets
-INTERVAL = "1m"      # 1-minute bars for aggressive scalping
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-def send_telegram_signal(signal_type, price):
-    emoji = "🟢 CALL (BUY)" if signal_type == "CALL" else "🔴 PUT (SELL)"
-    message = (
-        f"🚨 **POCKET OPTION SIGNAL** 🚨\n\n"
-        f"Asset: {SYMBOL}\n"
-        f"Action: {emoji}\n"
-        f"Entry Price: {price}\n"
-        f"Expiration: 1-3 Mins\n"
-        f"Strategy: Aggressive Momentum"
+# Temporary dictionary to store user selections
+# Format: {chat_id: {'pair': 'EURUSD_otc', 'timeframe': 60}}
+USER_STATE = {}
+
+# Timeframe mapping for humans vs Pocket Option API
+TIMEFRAME_MAP = {
+    "1 Min": 60,
+    "3 Mins": 180,
+    "5 Mins": 300
+}
+
+# --- MENU 1: Choose Pair ---
+@bot.message_code_handler
+@bot.message_handler(commands=['analyze', 'start'])
+def start_manual_analysis(message):
+    chat_id = message.chat.id
+    USER_STATE[chat_id] = {} # Reset state
+    
+    markup = InlineKeyboardMarkup(row_width=2)
+    # Common Pocket Option OTC Pairs
+    pairs = ["EURUSD_otc", "GBPUSD_otc", "AUDUSD_otc", "USDJPY_otc"]
+    
+    buttons = [InlineKeyboardButton(pair.upper().replace("_OTC", " OTC"), callback_data=f"pair_{pair}") for pair in pairs]
+    markup.add(*buttons)
+    
+    bot.send_message(chat_id, "📊 **Pocket Option Manual Analyzer**\n\nStep 1: Select an OTC Currency Pair:", reply_markup=markup, parse_mode="Markdown")
+
+# --- MENU 2: Choose Timeframe ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith('pair_'))
+def handle_pair_selection(call):
+    chat_id = call.message.chat.id
+    selected_pair = call.data.replace("pair_", "")
+    USER_STATE[chat_id]['pair'] = selected_pair
+    
+    markup = InlineKeyboardMarkup(row_width=3)
+    buttons = [InlineKeyboardButton(tf_text, callback_data=f"tf_{tf_text}") for tf_text in TIMEFRAME_MAP.keys()]
+    markup.add(*buttons)
+    
+    bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=call.message.message_id,
+        text=f"Selected Pair: **{selected_pair.upper()}**\n\nStep 2: Select the Timeframe:",
+        reply_markup=markup,
+        parse_mode="Markdown"
     )
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
-    try:
-        requests.post(url, json=payload)
-        print(f"Signal sent: {signal_type}")
-    except Exception as e:
-        print(f"Error sending Telegram message: {e}")
 
-def fetch_data():
-    # Fetching live public data from Binance as a proxy for asset movement
-    url = f"https://api.binance.com/api/v3/klines?symbol={SYMBOL.replace('/', '')}&interval={INTERVAL}&limit=100"
-    res = requests.get(url).json()
-    df = pd.DataFrame(res, columns=['time', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'qav', 'num_trades', 'taker_base', 'taker_quote', 'ignore'])
-    df['close'] = df['close'].astype(float)
-    return df
+# --- STEP 3: Trigger Analysis ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith('tf_'))
+def handle_timeframe_selection(call):
+    chat_id = call.message.chat.id
+    tf_text = call.data.replace("tf_", "")
+    
+    USER_STATE[chat_id]['timeframe_text'] = tf_text
+    USER_STATE[chat_id]['timeframe_seconds'] = TIMEFRAME_MAP[tf_text]
+    
+    pair = USER_STATE[chat_id]['pair']
+    
+    # Send a processing message
+    bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=call.message.message_id,
+        text=f"⏳ Pulling live OTC data for **{pair.upper()}** ({tf_text})...\nAnalyzing indicators..."
+    )
+    
+    # Run the async Pocket Option analysis inside the synchronous telebot handler
+    asyncio.run(run_otc_analysis(chat_id, call.message.message_id))
 
-def analyze_strategy():
+# --- CORE STRATEGIC ANALYSIS ---
+async def run_otc_analysis(chat_id, message_id):
+    pair = USER_STATE[chat_id]['pair']
+    tf_seconds = USER_STATE[chat_id]['timeframe_seconds']
+    tf_text = USER_STATE[chat_id]['timeframe_text']
+    
+    if not PO_SSID:
+        bot.send_message(chat_id, "❌ Error: `PO_SSID` variable is missing on Railway!")
+        return
+
     try:
-        df = fetch_data()
+        # Connect natively to PO OTC WebSocket
+        client = AsyncPocketOptionClient(PO_SSID, is_demo=True)
+        await client.connect()
         
-        # Calculate Indicators using 'ta' library
-        rsi = ta.momentum.RSIIndicator(close=df['close'], window=7).rsi() # Short window for aggressiveness
+        # Pull latest 50 candlesticks
+        df = await client.get_candles_dataframe(pair, tf_seconds, count=50)
+        await client.disconnect()
+        
+        if df.empty:
+            bot.send_message(chat_id, "⚠️ Pocket Option returned empty data. Please try again.")
+            return
+
+        # Fast Aggressive Indicator Math
+        rsi = ta.momentum.RSIIndicator(close=df['close'], window=7).rsi()
         macd = ta.trend.MACD(close=df['close'], window_fast=12, window_slow=26, window_sign=9)
         
         latest_rsi = rsi.iloc[-1]
         latest_macd_diff = macd.macd_diff().iloc[-1]
         current_price = df['close'].iloc[-1]
         
-        # --- AGGRESSIVE QUALITY STRATEGY ---
-        # CALL Conditions: RSI is oversold or turning up (> 45) AND MACD histogram is turning positive
+        # Evaluate Strategy
+        signal = "⏳ NO CLEAR SIGNAL (Market Neutral)"
+        emoji = "⚪"
+        
         if latest_rsi > 45 and latest_rsi < 65 and latest_macd_diff > 0:
-            send_telegram_signal("CALL", current_price)
-            
-        # PUT Conditions: RSI is overbought or turning down (< 55) AND MACD histogram is turning negative
+            signal = "CALL (BUY)"
+            emoji = "🟢"
         elif latest_rsi < 55 and latest_rsi > 35 and latest_macd_diff < 0:
-            send_telegram_signal("PUT", current_price)
-            
+            signal = "PUT (SELL)"
+            emoji = "🔴"
+
+        # Final Signal Output Layout
+        signal_message = (
+            f"🚨 **POCKET OPTION OTC SIGNAL** 🚨\n"
+            f"-------------------------------------\n"
+            f"📈 **Asset:** {pair.upper().replace('_OTC', ' OTC')}\n"
+            f"⏱️ **Timeframe:** {tf_text}\n"
+            f"💵 **Current Price:** {current_price}\n"
+            f"-------------------------------------\n"
+            f"⚡ **Action:** {emoji} **{signal}**\n"
+            f"⏳ **Expiration Recommendation:** {tf_text}\n\n"
+            f"ℹ️ _RSI: {latest_rsi:.1f} | MACD Diff: {latest_macd_diff:.4f}_"
+        )
+        
+        # Send the final signal!
+        bot.send_message(chat_id, signal_message, parse_mode="Markdown")
+        
     except Exception as e:
-        print(f"Error in analysis loop: {e}")
+        bot.send_message(chat_id, f"❌ Error analyzing chart: {str(e)}")
 
 if __name__ == "__main__":
-    print("🚀 Aggressive Pocket Option Signal Bot Started...")
-    while True:
-        analyze_strategy()
-        time.sleep(60)  # Check every 60 seconds for a new candle
+    print("🤖 Manual Telegram Signal Bot is active...")
+    bot.infinity_polling()
+    
