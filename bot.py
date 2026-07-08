@@ -91,25 +91,19 @@ async def run_otc_analysis(chat_id, message_id):
     tf_seconds = USER_STATE[chat_id]['timeframe_seconds']
     tf_text = USER_STATE[chat_id]['timeframe_text']
     
-    # Strip any accidental white spaces or quotation marks from your cookie variable
     clean_ssid = PO_SSID.strip().replace('"', '').replace("'", "") if PO_SSID else None
     
     if not clean_ssid:
         await bot.send_message(chat_id, "❌ Error: `PO_SSID` variable is missing or blank on Railway!")
         return
 
-    # Add standard mobile headers to bypass cloud host network blocking blocks
-    custom_headers = {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-    }
-
-    try:
-        # Initializing the client with demo environment configuration and standard headers
-        client = AsyncPocketOptionClient(clean_ssid, is_demo=True, headers=custom_headers)
-        await client.connect()
+    [span_4](start_span)try:
+        # Correct initialization without forbidden 'headers' argument
+        client = AsyncPocketOptionClient(clean_ssid, is_demo=True)[span_4](end_span)
+        await client.[span_5](start_span)connect()[span_5](end_span)
         
-        df = await client.get_candles_dataframe(pair, tf_seconds, count=50)
-        await client.disconnect()
+        df = await client.[span_6](start_span)get_candles_dataframe(pair, tf_seconds, count=50)[span_6](end_span)
+        await client.[span_7](start_span)disconnect()[span_7](end_span)
         
         if df is None or df.empty:
             await bot.send_message(chat_id, "⚠️ Server replied with an empty stream. Check if your PO_SSID cookie has expired.")
@@ -147,7 +141,7 @@ async def run_otc_analysis(chat_id, message_id):
         await bot.send_message(chat_id, signal_message, parse_mode="Markdown")
         
     except Exception as e:
-        await bot.send_message(chat_id, f"❌ Connection Error: {str(e)}\n\n💡 Tip: Try capturing a fresh PHPSESSID cookie from your Kiwi browser extension.")
+        await bot.send_message(chat_id, f"❌ Connection Error: {str(e)}")
 
 if __name__ == "__main__":
     print("🤖 Async Manual Telegram Signal Bot is running...")
