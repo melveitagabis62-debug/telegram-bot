@@ -1,4 +1,5 @@
 pyTelegramBotAPI
 pandas
 ta
-pocketoptionapi-async
+yfinance
+nest_asyncio
