@@ -1,3 +1,4 @@
-requests
+pyTelegramBotAPI
 pandas
 ta
+pocketoptionapi-async
