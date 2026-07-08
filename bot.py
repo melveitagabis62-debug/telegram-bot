@@ -24,7 +24,6 @@ TIMEFRAME_MAP = {
 }
 
 # --- MENU 1: Choose Pair ---
-@bot.message_code_handler
 @bot.message_handler(commands=['analyze', 'start'])
 def start_manual_analysis(message):
     chat_id = message.chat.id
