@@ -96,11 +96,17 @@ async def run_otc_analysis(chat_id, message_id):
         await bot.send_message(chat_id, "❌ Error: `PO_SSID` variable is missing or blank on Railway!")
         return
 
-    # Automatically decodes %3A -> : and %22 -> " so you don't have to clean it manually!
-    clean_ssid = urllib.parse.unquote(PO_SSID.strip().replace('"', '').replace("'", ""))
+    # Advanced data normalizer to unpack raw or encoded mobile data variants flawlessly
+    raw_decoded = urllib.parse.unquote(PO_SSID.strip().replace('"', '').replace("'", ""))
+    
+    # Strip away any 'ci_session=' prefix strings to match expected API structures
+    if raw_decoded.startswith("ci_session="):
+        clean_ssid = raw_decoded.replace("ci_session=", "")
+    else:
+        clean_ssid = raw_decoded
 
     try:
-        # Initializing clean client with absolutely NO 'headers' parameter
+        # Initializing clean client with zero extra arguments
         client = AsyncPocketOptionClient(clean_ssid, is_demo=True)
         await client.connect()
         
