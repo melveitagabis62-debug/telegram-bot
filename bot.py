@@ -10,7 +10,6 @@ from pocketoptionapi_async import AsyncPocketOptionClient
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 PO_SSID = os.getenv("PO_SSID")
 
-# Switching to full AsyncTeleBot to handle asynchronous calls natively
 bot = AsyncTeleBot(TELEGRAM_TOKEN)
 
 # Temporary dictionary to store user selections
@@ -30,8 +29,7 @@ async def start_manual_analysis(message):
     USER_STATE[chat_id] = {}  # Reset state
     
     markup = InlineKeyboardMarkup(row_width=2)
-    # Lowercase asset names matching the API requirements
-    pairs = ["eurusd_otc", "gbpusd_otc", "audusd_otc", "usdjpy_otc"]
+    pairs = ["eurusd_otc", "gbpusdt_otc", "audusd_otc", "usdjpy_otc"]
     
     buttons = [InlineKeyboardButton(pair.upper().replace("_OTC", " OTC"), callback_data=f"pair_{pair}") for pair in pairs]
     markup.add(*buttons)
@@ -52,7 +50,6 @@ async def handle_pair_selection(call):
     buttons = [InlineKeyboardButton(tf_text, callback_data=f"tf_{tf_text}") for tf_text in TIMEFRAME_MAP.keys()]
     markup.add(*buttons)
     
-    # Acknowledge the callback query so the loading circle disappears on the phone
     await bot.answer_callback_query(call.id)
     
     await bot.edit_message_text(
@@ -86,7 +83,6 @@ async def handle_timeframe_selection(call):
         text=f"⏳ Pulling live OTC data for **{pair.upper().replace('_OTC', ' OTC')}** ({tf_text})...\nAnalyzing indicators..."
     )
     
-    # Directly await the async analysis routine safely
     await run_otc_analysis(chat_id, call.message.message_id)
 
 # --- CORE STRATEGIC ANALYSIS ---
@@ -95,19 +91,28 @@ async def run_otc_analysis(chat_id, message_id):
     tf_seconds = USER_STATE[chat_id]['timeframe_seconds']
     tf_text = USER_STATE[chat_id]['timeframe_text']
     
-    if not PO_SSID:
-        await bot.send_message(chat_id, "❌ Error: `PO_SSID` variable is missing on Railway!")
+    # Strip any accidental white spaces or quotation marks from your cookie variable
+    clean_ssid = PO_SSID.strip().replace('"', '').replace("'", "") if PO_SSID else None
+    
+    if not clean_ssid:
+        await bot.send_message(chat_id, "❌ Error: `PO_SSID` variable is missing or blank on Railway!")
         return
 
+    # Add standard mobile headers to bypass cloud host network blocking blocks
+    custom_headers = {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+    }
+
     try:
-        client = AsyncPocketOptionClient(PO_SSID, is_demo=True)
+        # Initializing the client with demo environment configuration and standard headers
+        client = AsyncPocketOptionClient(clean_ssid, is_demo=True, headers=custom_headers)
         await client.connect()
         
         df = await client.get_candles_dataframe(pair, tf_seconds, count=50)
         await client.disconnect()
         
         if df is None or df.empty:
-            await bot.send_message(chat_id, "⚠️ Pocket Option returned empty data. Please verify your PO_SSID cookie or try again.")
+            await bot.send_message(chat_id, "⚠️ Server replied with an empty stream. Check if your PO_SSID cookie has expired.")
             return
 
         rsi = ta.momentum.RSIIndicator(close=df['close'], window=7).rsi()
@@ -142,7 +147,7 @@ async def run_otc_analysis(chat_id, message_id):
         await bot.send_message(chat_id, signal_message, parse_mode="Markdown")
         
     except Exception as e:
-        await bot.send_message(chat_id, f"❌ Error analyzing chart: {str(e)}")
+        await bot.send_message(chat_id, f"❌ Connection Error: {str(e)}\n\n💡 Tip: Try capturing a fresh PHPSESSID cookie from your Kiwi browser extension.")
 
 if __name__ == "__main__":
     print("🤖 Async Manual Telegram Signal Bot is running...")
