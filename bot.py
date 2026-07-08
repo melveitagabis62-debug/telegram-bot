@@ -1,26 +1,32 @@
 import os
 import asyncio
-import urllib.parse
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import pandas as pd
 import ta
-from pocketoptionapi_async import AsyncPocketOptionClient
+import yfinance as yf
 
 # Environment Variables from Railway
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-PO_SSID = os.getenv("PO_SSID")
 
 bot = AsyncTeleBot(TELEGRAM_TOKEN)
 
 # Temporary dictionary to store user selections
 USER_STATE = {}
 
-# Timeframe mapping
+# Timeframe mapping to Yahoo Finance (1m, 2m, 5m intervals)
 TIMEFRAME_MAP = {
-    "1 Min": 60,
-    "3 Mins": 180,
-    "5 Mins": 300
+    "1 Min": "1m",
+    "3 Mins": "2m", # yfinance uses 2m as closest liquid asset variant
+    "5 Mins": "5m"
+}
+
+# Mapping Pocket Option internal names to real-world Market symbols
+ASSET_MAP = {
+    "eurusd_otc": "EURUSD=X",
+    "gbpusdt_otc": "GBPUSD=X",
+    "audusd_otc": "AUDUSD=X",
+    "usdjpy_otc": "JPY=X"
 }
 
 # --- MENU 1: Choose Pair ---
@@ -72,7 +78,7 @@ async def handle_timeframe_selection(call):
         return
         
     USER_STATE[chat_id]['timeframe_text'] = tf_text
-    USER_STATE[chat_id]['timeframe_seconds'] = TIMEFRAME_MAP[tf_text]
+    USER_STATE[chat_id]['interval'] = TIMEFRAME_MAP[tf_text]
     
     pair = USER_STATE[chat_id]['pair']
     
@@ -81,41 +87,32 @@ async def handle_timeframe_selection(call):
     await bot.edit_message_text(
         chat_id=chat_id,
         message_id=call.message.message_id,
-        text=f"⏳ Pulling live OTC data for **{pair.upper().replace('_OTC', ' OTC')}** ({tf_text})...\nAnalyzing indicators..."
+        text=f"⏳ Pulling live tracking data for **{pair.upper().replace('_OTC', ' OTC')}** ({tf_text})...\nAnalyzing indicators..."
     )
     
-    await run_otc_analysis(chat_id, call.message.message_id)
+    # Run data retrieval safely in the background threads
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, run_market_analysis, chat_id)
 
 # --- CORE STRATEGIC ANALYSIS ---
-async def run_otc_analysis(chat_id, message_id):
-    pair = USER_STATE[chat_id]['pair']
-    tf_seconds = USER_STATE[chat_id]['timeframe_seconds']
+def run_market_analysis(chat_id):
+    pair_key = USER_STATE[chat_id]['pair']
+    interval = USER_STATE[chat_id]['interval']
     tf_text = USER_STATE[chat_id]['timeframe_text']
     
-    if not PO_SSID:
-        await bot.send_message(chat_id, "❌ Error: `PO_SSID` variable is missing or blank on Railway!")
-        return
-
-    # Advanced data normalizer to unpack raw or encoded mobile data variants flawlessly
-    raw_decoded = urllib.parse.unquote(PO_SSID.strip().replace('"', '').replace("'", ""))
-    
-    # Strip away any 'ci_session=' prefix strings to match expected API structures
-    if raw_decoded.startswith("ci_session="):
-        clean_ssid = raw_decoded.replace("ci_session=", "")
-    else:
-        clean_ssid = raw_decoded
+    ticker_symbol = ASSET_MAP.get(pair_key, "EURUSD=X")
 
     try:
-        # Initializing clean client with zero extra arguments
-        client = AsyncPocketOptionClient(clean_ssid, is_demo=True)
-        await client.connect()
-        
-        df = await client.get_candles_dataframe(pair, tf_seconds, count=50)
-        await client.disconnect()
+        # Download data directly from public streams instantly with zero cookies
+        ticker = yf.Ticker(ticker_symbol)
+        df = ticker.history(period="1d", interval=interval)
         
         if df is None or df.empty:
-            await bot.send_message(chat_id, "⚠️ Server replied with an empty stream. Your session token might have expired. Try re-copying it!")
+            asyncio.run_coroutine_threadsafe(bot.send_message(chat_id, "⚠️ Failed to fetch feed data. Retrying..."), bot.loop)
             return
+
+        # Clean column labels to fit technical indicator calculations
+        df.columns = [col.lower() for col in df.columns]
 
         rsi = ta.momentum.RSIIndicator(close=df['close'], window=7).rsi()
         macd = ta.trend.MACD(close=df['close'], window_fast=12, window_slow=26, window_sign=9)
@@ -135,23 +132,24 @@ async def run_otc_analysis(chat_id, message_id):
             emoji = "🔴"
 
         signal_message = (
-            f"🚨 **POCKET OPTION OTC SIGNAL** 🚨\n"
+            f"🚨 **POCKET OPTION AUTOMATED SIGNAL** 🚨\n"
             f"-------------------------------------\n"
-            f"📈 **Asset:** {pair.upper().replace('_OTC', ' OTC')}\n"
+            f"📈 **Asset:** {pair_key.upper().replace('_OTC', ' OTC')}\n"
             f"⏱️ **Timeframe:** {tf_text}\n"
-            f"💵 **Current Price:** {current_price}\n"
+            f"💵 **Current Price:** {current_price:.5f}\n"
             f"-------------------------------------\n"
             f"⚡ **Action:** {emoji} **{signal}**\n"
             f"⏳ **Expiration Recommendation:** {tf_text}\n\n"
-            f"ℹ️ _RSI: {latest_rsi:.1f} | MACD Diff: {latest_macd_diff:.4f}_"
+            f"ℹ️ _RSI: {latest_rsi:.1f} | MACD Diff: {latest_macd_diff:.5f}_"
         )
         
-        await bot.send_message(chat_id, signal_message, parse_mode="Markdown")
+        asyncio.run_coroutine_threadsafe(bot.send_message(chat_id, signal_message, parse_mode="Markdown"), bot.loop)
         
     except Exception as e:
-        await bot.send_message(chat_id, f"❌ Connection Error: {str(e)}")
+        asyncio.run_coroutine_threadsafe(bot.send_message(chat_id, f"❌ Engine Error: {str(e)}"), bot.loop)
 
 if __name__ == "__main__":
+    import nest_asyncio
+    nest_asyncio.apply()
     print("🤖 Async Manual Telegram Signal Bot is running...")
     asyncio.run(bot.infinity_polling())
-    
