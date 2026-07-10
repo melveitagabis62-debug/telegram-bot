@@ -1,4 +1,4 @@
 pyTelegramBotAPI
 pandas
 pandas-ta
-https://github.com/MathAguiar/tvdatafeed/archive/refs/heads/main.zip
+git+https://github.com/StreamAlpha/tvdatafeed.git
