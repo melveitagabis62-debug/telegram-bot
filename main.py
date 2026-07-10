@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # ===== CONFIG =====
-TOKEN = "YOUR_BOT_TOKEN_HERE"
+TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 PAIR = "EURUSD"
 TIMEFRAME = "5m"
