@@ -1,5 +1,5 @@
 pyTelegramBotAPI
 pandas
-ta
-yfinance
-nest_asyncio
+pandas-ta
+git+https://github.com/StreamAlpha/tvdatafeed.git
+
