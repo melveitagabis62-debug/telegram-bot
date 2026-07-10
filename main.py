@@ -48,12 +48,12 @@ def get_entry_timing(timeframe):
 
     remaining = total_seconds - seconds_passed
 
-    if remaining > total_seconds * 0.6:
-        return f"⏳ WAIT ({remaining}s left in candle)"
+    if remaining > total_seconds * 0.7:
+        return f"⏳ CANDLE START ({remaining}s left)"
     elif remaining > total_seconds * 0.15:
-        return f"⚠️ PREPARE ({remaining}s)"
+        return f"🔥 MOMENTUM RIDE ({remaining}s)"
     else:
-        return f"🔥 ENTER NOW ({remaining}s to new candle)"
+        return f"🚨 LAST SECOND SNIPER ({remaining}s left)"
 
 # === SESSION DETECTION ===
 def get_trading_session():
@@ -63,24 +63,23 @@ def get_trading_session():
     if 7 <= hour < 13:
         return "🇬🇧 London Session OPEN"
     elif 13 <= hour < 17:
-        return "🔥 London-New York OVERLAP (BEST TIME)"
+        return "🔥 London-New York OVERLAP"
     elif 17 <= hour < 22:
         return "🇺🇸 New York Session OPEN"
     else:
-        return None
+        return "🌏 Asian / Off-Peak Session ACTIVE"
 
 # === AUTO SESSION NOTIFIER ===
 async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
     session = get_trading_session()
-    if session:
-        for user_id in ALLOWED_USERS:
-            try:
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text=f"{session}\n\n💡 Market is active — look for sniper entries!"
-                )
-            except Exception:
-                pass
+    for user_id in ALLOWED_USERS:
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"{session}\n\n💡 Scan assets for hyper-frequency execution!"
+            )
+        except Exception:
+            pass
 
 # === RESULT BUTTONS ===
 def result_buttons():
@@ -146,20 +145,14 @@ def get_analysis(symbol, interval):
     )
     return handler.get_analysis()
 
-# === OPTIMIZED AGGRESSIVE FILTERS ===
-def rejection_wick(open_p, close_p, high, low):
+# === HYPER-AGGRESSIVE INTERPRETATION ENGINES ===
+def micro_rejection_wick(open_p, close_p, high, low):
     body = abs(close_p - open_p)
     if body == 0: body = 0.00001
     upper_wick = high - max(open_p, close_p)
     lower_wick = min(open_p, close_p) - low
-    # Lowered threshold from 2.0 to 1.3 to capture high-velocity rejection flips early
-    return upper_wick > body * 1.3 or lower_wick > body * 1.3
-
-def is_no_trade_zone(rsi, price, ema, high, low):
-    # Tightened from 45-55 to 47-53 so the bot doesn't choke during standard consolidation
-    mid_rsi = 47 < rsi < 53
-    small_candle = (high - low) / price < 0.0004
-    return mid_rsi and small_candle
+    # Max sensitivity: triggers on almost any structural pushback
+    return upper_wick > body * 0.8 or lower_wick > body * 0.8
 
 def generate_signal(pair, timeframe):
     try:
@@ -168,10 +161,6 @@ def generate_signal(pair, timeframe):
             "5m": Interval.INTERVAL_5_MINUTES,
             "15m": Interval.INTERVAL_15_MINUTES
         }
-
-        hour = datetime.datetime.utcnow().hour
-        if not (7 <= hour <= 22):
-            return "⛔ Trade only London/New York session"
 
         analysis = get_analysis(pair, interval_map[timeframe])
 
@@ -182,68 +171,76 @@ def generate_signal(pair, timeframe):
         high = analysis.indicators["high"]
         low = analysis.indicators["low"]
 
-        prev_open = open_price
-        prev_close = price
-
-        # Softer no-trade zone
-        if is_no_trade_zone(rsi, price, ema50, high, low):
-            # Reduced strictness
-            small_candle = (high - low) / price < 0.0012
-            flat_ema = abs(price - ema50) / price < 0.0008
-            if small_candle and flat_ema and 48 < rsi < 52:
-                return "⛔ No Trade Zone (choppy market)"
+        # Absolute bare minimum flat filter (only dead weekends)
+        if 49.5 < rsi < 50.5 and (high - low) / price < 0.0001:
+            return "⏳ Market completely flat. Retry in 30 seconds."
 
         trend = "UP" if price > ema50 else "DOWN"
-
-        # Softer fake breakout
-        if is_fake_breakout(open_price, price, high, low) and (high - low) / price > 0.003:
-            return "⛔ Fake breakout"
-
-        support = low
-        resistance = high
-
-        # More aggressive proximity
-        near_support = abs(price - support) / price < 0.004
-        near_resistance = abs(price - resistance) / price < 0.004
-
-        signal = None
-
-        engulf = detect_engulfing(open_price, price, prev_open, prev_close)
-        wick_reject = rejection_wick(open_price, price, high, low)
+        wick_reject = micro_rejection_wick(open_price, price, high, low)
         
-        # New RSI momentum boost
-        rsi_momentum = (trend == "UP" and rsi < 65) or (trend == "DOWN" and rsi > 35)
+        signal = None
+        mode = ""
+        confidence = 3
 
-        if trend == "UP" and near_support and (engulf or wick_reject or rsi_momentum):
-            signal = "BUY"
-        elif trend == "DOWN" and near_resistance and (engulf or wick_reject or rsi_momentum):
+        # --- MAX AGGRESSION ENGINE ---
+        if trend == "UP":
+            if rsi >= 50: 
+                # Mode A: Trend Following / Breakdown continuation
+                signal = "BUY"
+                mode = "📈 CONTINUATION BURST"
+                confidence += 1
+                if rsi > 60: confidence += 1
+            else:
+                # Mode B: Deep discount buy-the-dip
+                signal = "BUY"
+                mode = "🎯 TRENDING PULLBACK"
+                confidence += 2
+                if wick_reject: confidence += 1
+
+        elif trend == "DOWN":
+            if rsi <= 50:
+                # Mode A: Trend Following Short
+                signal = "SELL"
+                mode = "📉 BREAKDOWN CONTINUATION"
+                confidence += 1
+                if rsi < 40: confidence += 1
+            else:
+                # Mode B: Short the peak of a counter-rally
+                signal = "SELL"
+                mode = "🎯 TRENDING RALLY SHORT"
+                confidence += 2
+                if wick_reject: confidence += 1
+
+        # --- COUNTER-TREND EMERGENCY REVERSION ENGINE ---
+        # Overrides standard trend direction if the asset is drastically overextended
+        if rsi > 72:
             signal = "SELL"
+            mode = "⚠️ ULTRA-MAX OVERBOUGHT REVERSION"
+            confidence = 5
+        elif rsi < 28:
+            signal = "BUY"
+            mode = "⚠️ ULTRA-MAX OVERSOLD REVERSION"
+            confidence = 5
 
         if not signal:
-            return "⏳ Waiting for sniper setup"
+            return "⏳ Processing microstructural patterns... Query again."
 
         expiration = {
-            "1m": "2-3 minutes",
-            "5m": "5-10 minutes",
-            "15m": "15-30 minutes"
-        }[timeframe]
-
-        # Improved confidence
-        confidence = 4
-        if engulf: confidence += 1
-        if wick_reject: confidence += 1
-        if rsi_momentum: confidence += 1
+            "1m": "1-2 minutes",
+            "5m": "5 minutes",
+            "15m": "15 minutes"
+        }.get(timeframe, "2 minutes")
 
         if signal == "BUY":
-            result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🟢 BUY @ {round(price,5)}"
+            result = f"🔥 EXECUTE NOW\n🟢 BUY @ {round(price,5)}"
         else:
-            result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🔴 SELL @ {round(price,5)}"
+            result = f"🔥 EXECUTE NOW\n🔴 SELL @ {round(price,5)}"
 
         amount = get_trade_amount()
         timing = get_entry_timing(timeframe)
 
         return f"""
-📊 **Sigma AI ELITE SNIPER** (Aggressive Mode)
+📊 Sigma AI MAX SNIPER V2
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -251,24 +248,27 @@ def generate_signal(pair, timeframe):
 {result}
 {timing}
 
-🔥 Confidence: {confidence}/7
+🎯 Engine Mode: {mode}
+🔥 Confidence: {confidence}/6
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
 
 ⏳ Expiration: {expiration}
 
-📊 RSI: {round(rsi,2)} | Trend: {trend}
+📊 RSI: {round(rsi,2)}
+📊 Trend: {trend}
 """
+
     except Exception as e:
-        print(e)
-        return "❌ Error fetching data"
-    
+        print(f"Error: {e}")
+        return "❌ Instability processing exchange data. Re-send."
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
         return
-    await update.message.reply_text("🚀 Bot Started", reply_markup=main_menu())
+    await update.message.reply_text("🚀 Bot Running in Max Aggression Mode", reply_markup=main_menu())
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text.lower() in ["start bot", "🚀 start bot"]:
@@ -317,7 +317,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 app = ApplicationBuilder().token(TOKEN).build()
 
-# ✅ RUN SESSION NOTIFIER
 app.job_queue.run_repeating(session_notifier, interval=300, first=10)
 
 app.add_handler(CommandHandler("start", start))
@@ -325,3 +324,4 @@ app.add_handler(CallbackQueryHandler(handle_buttons))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
 app.run_polling()
+    
