@@ -42,18 +42,15 @@ def get_entry_timing(timeframe):
     elif timeframe == "15m":
         total_seconds = 900
         seconds_passed = (now.minute % 15) * 60 + now.second
-    else:
-        total_seconds = 60
-        seconds_passed = now.second
 
     remaining = total_seconds - seconds_passed
 
-    if remaining > total_seconds * 0.7:
-        return f"⏳ CANDLE START ({remaining}s left)"
-    elif remaining > total_seconds * 0.15:
-        return f"🔥 MOMENTUM RIDE ({remaining}s)"
+    if remaining > total_seconds * 0.6:
+        return f"⏳ WAIT ({remaining}s left in candle)"
+    elif remaining > total_seconds * 0.2:
+        return f"⚠️ PREPARE ({remaining}s)"
     else:
-        return f"🚨 LAST SECOND SNIPER ({remaining}s left)"
+        return f"🔥 ENTER NOW ({remaining}s to new candle)"
 
 # === SESSION DETECTION ===
 def get_trading_session():
@@ -63,23 +60,21 @@ def get_trading_session():
     if 7 <= hour < 13:
         return "🇬🇧 London Session OPEN"
     elif 13 <= hour < 17:
-        return "🔥 London-New York OVERLAP"
+        return "🔥 London-New York OVERLAP (BEST TIME)"
     elif 17 <= hour < 22:
         return "🇺🇸 New York Session OPEN"
     else:
-        return "🌏 Asian / Off-Peak Session ACTIVE"
+        return None
 
 # === AUTO SESSION NOTIFIER ===
 async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
     session = get_trading_session()
-    for user_id in ALLOWED_USERS:
-        try:
+    if session:
+        for user_id in ALLOWED_USERS:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"{session}\n\n💡 Scan assets for hyper-frequency execution!"
+                text=f"{session}\n\n💡 Market is active — MAX AGGRESSIVE signals firing!"
             )
-        except Exception:
-            pass
 
 # === RESULT BUTTONS ===
 def result_buttons():
@@ -145,14 +140,24 @@ def get_analysis(symbol, interval):
     )
     return handler.get_analysis()
 
-# === HYPER-AGGRESSIVE INTERPRETATION ENGINES ===
-def micro_rejection_wick(open_p, close_p, high, low):
+# === MAX AGGRESSIVE PATTERN DETECTION ===
+def is_fake_breakout(open_price, close, high, low):
+    body = abs(close - open_price)
+    wick = high - low
+    return wick > body * 2.5
+
+def detect_engulfing(open_p, close_p, prev_open, prev_close):
+    return (close_p > open_p and prev_close < prev_open and close_p > prev_open) or \
+           (close_p < open_p and prev_close > prev_open and close_p < prev_open)
+
+def rejection_wick(open_p, close_p, high, low):
     body = abs(close_p - open_p)
-    if body == 0: body = 0.00001
     upper_wick = high - max(open_p, close_p)
     lower_wick = min(open_p, close_p) - low
-    # Max sensitivity: triggers on almost any structural pushback
-    return upper_wick > body * 0.8 or lower_wick > body * 0.8
+    return upper_wick > body * 1.8 or lower_wick > body * 1.8
+
+def is_no_trade_zone(rsi, price, ema, high, low):
+    return False  # Disabled for MAX mode
 
 def generate_signal(pair, timeframe):
     try:
@@ -162,85 +167,91 @@ def generate_signal(pair, timeframe):
             "15m": Interval.INTERVAL_15_MINUTES
         }
 
+        hour = datetime.datetime.utcnow().hour
+        if not (7 <= hour <= 22):
+            return "⛔ Trade only London/New York session"
+
         analysis = get_analysis(pair, interval_map[timeframe])
 
-        rsi = analysis.indicators["RSI"]
-        ema50 = analysis.indicators["EMA50"]
+        rsi = analysis.indicators.get("RSI", 50)
+        ema50 = analysis.indicators.get("EMA50", 0)
+        macd = analysis.indicators.get("MACD.macd", 0)
+        macd_signal = analysis.indicators.get("MACD.signal", 0)
+        stoch_k = analysis.indicators.get("Stoch.K", 50)
+        
         price = analysis.indicators["close"]
         open_price = analysis.indicators["open"]
         high = analysis.indicators["high"]
         low = analysis.indicators["low"]
 
-        # Absolute bare minimum flat filter (only dead weekends)
-        if 49.5 < rsi < 50.5 and (high - low) / price < 0.0001:
-            return "⏳ Market completely flat. Retry in 30 seconds."
+        prev_open = open_price
+        prev_close = price
 
         trend = "UP" if price > ema50 else "DOWN"
-        wick_reject = micro_rejection_wick(open_price, price, high, low)
-        
+
+        # Very soft fake breakout
+        if is_fake_breakout(open_price, price, high, low) and (high - low) / price > 0.006:
+            pass  # Don't block, just continue
+
+        engulf = detect_engulfing(open_price, price, prev_open, prev_close)
+        wick_reject = rejection_wick(open_price, price, high, low)
+        macd_bull = macd > macd_signal
+        macd_bear = macd < macd_signal
+        stoch_oversold = stoch_k < 28
+        stoch_overbought = stoch_k > 72
+
         signal = None
-        mode = ""
-        confidence = 3
+        reasons = []
 
-        # --- MAX AGGRESSION ENGINE ---
+        # MAX aggressive proximity
+        near_support = abs(price - low) / price < 0.008
+        near_resistance = abs(price - high) / price < 0.008
+
         if trend == "UP":
-            if rsi >= 50: 
-                # Mode A: Trend Following / Breakdown continuation
+            if near_support or macd_bull or stoch_oversold or engulf or wick_reject:
                 signal = "BUY"
-                mode = "📈 CONTINUATION BURST"
-                confidence += 1
-                if rsi > 60: confidence += 1
-            else:
-                # Mode B: Deep discount buy-the-dip
-                signal = "BUY"
-                mode = "🎯 TRENDING PULLBACK"
-                confidence += 2
-                if wick_reject: confidence += 1
-
-        elif trend == "DOWN":
-            if rsi <= 50:
-                # Mode A: Trend Following Short
+                if near_support: reasons.append("Support")
+                if macd_bull: reasons.append("MACD")
+                if stoch_oversold: reasons.append("Stoch")
+                if engulf: reasons.append("Engulf")
+        else:
+            if near_resistance or macd_bear or stoch_overbought or engulf or wick_reject:
                 signal = "SELL"
-                mode = "📉 BREAKDOWN CONTINUATION"
-                confidence += 1
-                if rsi < 40: confidence += 1
-            else:
-                # Mode B: Short the peak of a counter-rally
-                signal = "SELL"
-                mode = "🎯 TRENDING RALLY SHORT"
-                confidence += 2
-                if wick_reject: confidence += 1
+                if near_resistance: reasons.append("Resistance")
+                if macd_bear: reasons.append("MACD")
+                if stoch_overbought: reasons.append("Stoch")
+                if engulf: reasons.append("Engulf")
 
-        # --- COUNTER-TREND EMERGENCY REVERSION ENGINE ---
-        # Overrides standard trend direction if the asset is drastically overextended
-        if rsi > 72:
-            signal = "SELL"
-            mode = "⚠️ ULTRA-MAX OVERBOUGHT REVERSION"
-            confidence = 5
-        elif rsi < 28:
-            signal = "BUY"
-            mode = "⚠️ ULTRA-MAX OVERSOLD REVERSION"
-            confidence = 5
-
+        # Ultimate fallback - always give a signal
         if not signal:
-            return "⏳ Processing microstructural patterns... Query again."
+            signal = "BUY" if trend == "UP" else "SELL"
+            reasons.append("Trend Bias")
 
         expiration = {
-            "1m": "1-2 minutes",
-            "5m": "5 minutes",
-            "15m": "15 minutes"
-        }.get(timeframe, "2 minutes")
+            "1m": "1-3 minutes",
+            "5m": "3-8 minutes",
+            "15m": "10-20 minutes"
+        }[timeframe]
+
+        # Confidence
+        confidence = 3
+        if engulf: confidence += 2
+        if wick_reject: confidence += 1
+        if macd_bull or macd_bear: confidence += 1
+        if stoch_oversold or stoch_overbought: confidence += 1
+        if near_support or near_resistance: confidence += 1
 
         if signal == "BUY":
-            result = f"🔥 EXECUTE NOW\n🟢 BUY @ {round(price,5)}"
+            result = f"🔥 **MAX AGGRESSIVE** ENTER NOW\n🟢 BUY @ {round(price,5)}"
         else:
-            result = f"🔥 EXECUTE NOW\n🔴 SELL @ {round(price,5)}"
+            result = f"🔥 **MAX AGGRESSIVE** ENTER NOW\n🔴 SELL @ {round(price,5)}"
 
         amount = get_trade_amount()
         timing = get_entry_timing(timeframe)
+        reason_str = " | ".join(reasons[:3]) if reasons else "Momentum"
 
         return f"""
-📊 Sigma AI MAX SNIPER V2
+📊 **Sigma AI ELITE SNIPER — MAX AGGRESSIVE**
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -248,30 +259,28 @@ def generate_signal(pair, timeframe):
 {result}
 {timing}
 
-🎯 Engine Mode: {mode}
-🔥 Confidence: {confidence}/6
+🔥 Confidence: {confidence}/8
+📋 Reason: {reason_str}
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
 
 ⏳ Expiration: {expiration}
 
-📊 RSI: {round(rsi,2)}
-📊 Trend: {trend}
+📊 RSI: {round(rsi,1)} | Trend: {trend}
 """
-
     except Exception as e:
-        print(f"Error: {e}")
-        return "❌ Instability processing exchange data. Re-send."
+        print("Signal Error:", e)
+        return "❌ Data error — try again"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
         return
-    await update.message.reply_text("🚀 Bot Running in Max Aggression Mode", reply_markup=main_menu())
+    await update.message.reply_text("🚀 Sigma AI SNIPER (MAX AGGRESSIVE) Started!", reply_markup=main_menu())
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text.lower() in ["start bot", "🚀 start bot"]:
+    if update.message.text.lower() in ["start bot", "🚀 start bot", "start"]:
         await start(update, context)
 
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -317,11 +326,11 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 app = ApplicationBuilder().token(TOKEN).build()
 
+# ✅ RUN SESSION NOTIFIER
 app.job_queue.run_repeating(session_notifier, interval=300, first=10)
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(handle_buttons))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+app.add_handler(MessageHandler(filters.TEXT & \~filters.COMMAND, handle_text))
 
 app.run_polling()
-    
