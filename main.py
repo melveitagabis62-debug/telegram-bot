@@ -1,149 +1,83 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
-from telegram.ext import MessageHandler, filters
 
 from tradingview_ta import TA_Handler, Interval
 import logging
+
 import os
-import datetime
 
 TOKEN = os.getenv("TOKEN")
-ALLOWED_USERS = [6351041498]
+ALLOWED_USERS = [6351041498]  # replace with your Telegram ID
 
-# === TRACKING SYSTEM ===
-WIN = 0
-LOSS = 0
-MARTINGALE_STEP = 0
-MARTINGALE_ENABLED = True
-
-def get_trade_amount(base=1):
-    if not MARTINGALE_ENABLED:
-        return base
-    return base * (2 ** MARTINGALE_STEP)
-
-def reset_martingale():
-    global MARTINGALE_STEP
-    MARTINGALE_STEP = 0
-
-def increase_martingale():
-    global MARTINGALE_STEP
-    MARTINGALE_STEP += 1
-
-# === ENTRY TIMING SYSTEM ===
-def get_entry_timing(timeframe):
-    now = datetime.datetime.utcnow()
-
-    if timeframe == "1m":
-        total_seconds = 60
-        seconds_passed = now.second
-
-    elif timeframe == "5m":
-        total_seconds = 300
-        seconds_passed = (now.minute % 5) * 60 + now.second
-
-    elif timeframe == "15m":
-        total_seconds = 900
-        seconds_passed = (now.minute % 15) * 60 + now.second
-
-    remaining = total_seconds - seconds_passed
-
-    if remaining > total_seconds * 0.6:
-        return f"⏳ WAIT ({remaining}s left in candle)"
-    elif remaining > total_seconds * 0.2:
-        return f"⚠️ PREPARE ({remaining}s)"
-    else:
-        return f"🚀 Perfect Timing ({remaining}s to new candle)"
-
-# === SESSION DETECTION ===
-def get_trading_session():
-    now = datetime.datetime.utcnow()
-    hour = now.hour
-
-    if 7 <= hour < 13:
-        return "🇬🇧 London Session OPEN"
-    elif 13 <= hour < 17:
-        return "🔥 London-New York OVERLAP (BEST TIME)"
-    elif 17 <= hour < 22:
-        return "🇺🇸 New York Session OPEN"
-    else:
-        return None
-
-# === AUTO SESSION NOTIFIER ===
-async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
-    session = get_trading_session()
-
-    if session:
-        for user_id in ALLOWED_USERS:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=f"{session}\n\n💡 Market is active — spam mode ON!"
-            )
-
-# === RESULT BUTTONS ===
-def result_buttons():
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ WIN", callback_data="result_win"),
-            InlineKeyboardButton("❌ LOSS", callback_data="result_loss")
-        ]
-    ])
-
+# 🔥 ADD THIS RIGHT HERE
 PAIRS = [
-    "EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD",
-    "EURJPY","GBPJPY","AUDJPY","CADJPY","CHFJPY",
-    "EURGBP","EURCHF","EURAUD","EURCAD",
-    "GBPAUD","GBPCAD","GBPCHF",
-    "AUDCAD","AUDCHF","CADCHF"
+    "EURUSD", "GBPUSD", "USDJPY", "AUDUSD",
+    "USDCAD", "USDCHF", "NZDUSD",
+    "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY",
+    "EURGBP", "EURCHF", "EURAUD", "EURCAD",
+    "GBPAUD", "GBPCAD", "GBPCHF",
+    "AUDCAD", "AUDCHF",
+    "CADCHF"
 ]
 
-CRYPTO_PAIRS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]
+# ================= MENU =================
 
 def main_menu():
-    return InlineKeyboardMarkup([
+    keyboard = [
         [InlineKeyboardButton("📊 Forex", callback_data="forex")],
         [InlineKeyboardButton("💰 Crypto", callback_data="crypto")]
-    ])
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 
 def forex_menu():
-    keyboard, row = [], []
+    keyboard = []
+    row = []
+
     for i, pair in enumerate(PAIRS, 1):
-        row.append(InlineKeyboardButton(pair[:3]+"/"+pair[3:], callback_data=pair))
+        display = pair[:3] + "/" + pair[3:]  # EURUSD → EUR/USD
+
+        row.append(
+            InlineKeyboardButton(display, callback_data=pair)
+        )
+
         if i % 2 == 0:
             keyboard.append(row)
             row = []
-    if row: keyboard.append(row)
-    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="back_main")])
+
+    if row:
+        keyboard.append(row)
+
+    keyboard.append([
+        InlineKeyboardButton("⬅️ Back", callback_data="back")
+    ])
+
     return InlineKeyboardMarkup(keyboard)
 
-def crypto_menu():
-    keyboard, row = [], []
-    for i, pair in enumerate(CRYPTO_PAIRS, 1):
-        row.append(InlineKeyboardButton(pair.replace("USDT","/USDT"), callback_data=f"crypto_{pair}"))
-        if i % 2 == 0:
-            keyboard.append(row)
-            row = []
-    if row: keyboard.append(row)
-    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="back_main")])
-    return InlineKeyboardMarkup(keyboard)
 
 def timeframe_menu(pair):
-    return InlineKeyboardMarkup([
+    keyboard = [
         [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"),
          InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
         [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")],
-        [InlineKeyboardButton("⬅️ Back", callback_data="back_forex")]
-    ])
+        
+        [InlineKeyboardButton("⬅️ Back", callback_data="back_forex")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+# ================= SIGNAL =================
 
 def get_analysis(symbol, interval):
     handler = TA_Handler(
         symbol=symbol,
-        screener="crypto" if "USDT" in symbol else "forex",
-        exchange="BINANCE" if "USDT" in symbol else "FX_IDC",
+        screener="forex",
+        exchange="FX_IDC",
         interval=interval
     )
-    return handler.get_analysis()
 
-# === IMPROVED SIGNAL GENERATION (BALANCED MODE) ===
+    analysis = handler.get_analysis()
+    return analysis
+
 
 def generate_signal(pair, timeframe):
     try:
@@ -153,216 +87,150 @@ def generate_signal(pair, timeframe):
             "15m": Interval.INTERVAL_15_MINUTES
         }
 
-        hour = datetime.datetime.utcnow().hour
-        if not (7 <= hour <= 22):
-            return "⛔ Trade only London/New York session"
-
-        # ===== MAIN TF =====
         analysis = get_analysis(pair, interval_map[timeframe])
 
-        # ===== HIGHER TF (MTF CONFIRMATION) =====
-        higher_tf = "5m" if timeframe == "1m" else "15m"
-        analysis_htf = get_analysis(pair, interval_map[higher_tf])
-
-        # ===== INDICATORS =====
         rsi = analysis.indicators["RSI"]
+        macd = analysis.indicators["MACD.macd"]
         ema50 = analysis.indicators["EMA50"]
         price = analysis.indicators["close"]
 
-        macd = analysis.indicators.get("MACD.macd", 0)
-        macd_signal = analysis.indicators.get("MACD.signal", 0)
+        # ================= STRATEGY LOGIC =================
 
-        # ===== HIGHER TF TREND =====
-        htf_price = analysis_htf.indicators["close"]
-        htf_ema50 = analysis_htf.indicators["EMA50"]
-        htf_trend = "UP" if htf_price > htf_ema50 else "DOWN"
+        signal = "HOLD"
+        warning = ""
 
-        trend = "UP" if price > ema50 else "DOWN"
+        # 🔥 Detect strong trend (avoid trading)
+        if abs(price - ema50) > (price * 0.002):  # far from EMA = strong trend
+            warning = "⚠️ Strong trend detected → DO NOT TRADE"
 
-        # ❗ MTF FILTER
-        if trend != htf_trend:
-            return "⛔ MTF Conflict (1m vs 5m)"
+        # 🟢 BUY (mean reversion)
+        elif rsi < 30 and price >= ema50 * 0.995:
+            signal = "BUY"
 
-        distance = abs(price - ema50)
-
-        # ===== RSI =====
-        rsi_prev = analysis.indicators.get("RSI[1]", rsi)
-        rsi_up = rsi > rsi_prev
-        rsi_down = rsi < rsi_prev
-
-        # ===== MACD =====
-        macd_strength = abs(macd - macd_signal)
-        macd_aligned = (macd > 0 and trend == "UP") or (macd < 0 and trend == "DOWN")
-
-        # ===== STABILITY =====
-        price_prev = analysis.indicators.get("close[1]", price)
-        candle_move = abs(price - price_prev)
-        stable_market = candle_move < (price * 0.0015)
-
-        clean_trend = (distance / price) > 0.0005
-
-        # =========================================
-        # 🔥 SUPPORT / RESISTANCE (BASIC ZONE)
-        # =========================================
-
-        high = analysis.indicators.get("high", price)
-        low = analysis.indicators.get("low", price)
-
-        resistance_zone = high * 0.999
-        support_zone = low * 1.001
-
-        near_resistance = price >= resistance_zone
-        near_support = price <= support_zone
-
-        # =========================================
-        # 🔥 SNIPER MODE
-        # =========================================
-
-        strong_momentum = distance > (price * 0.0008)
-        strong_macd = macd_strength > 0.00008
-        entry_ok = distance < (price * 0.0016)
-        pullback_ok = distance < (price * 0.0011)
-
-        if trend == "UP":
-            if near_resistance:
-                return "🚫 Near Resistance - Skip"
-
-            if (53 < rsi < 61 and rsi_up
-                and macd > macd_signal and strong_macd and macd_aligned
-                and strong_momentum and clean_trend
-                and entry_ok and pullback_ok
-                and stable_market):
-
-                signal_type = "🔥 STRONG BUY (SNIPER)"
-                action = f"🟢 BUY @ {round(price,5)}"
-
-            elif (50 < rsi < 65 and rsi_up
-                  and macd > macd_signal
-                  and macd_strength > 0.00006
-                  and clean_trend):
-
-                signal_type = "⚡ QUICK BUY"
-                action = f"🟢 BUY @ {round(price,5)}"
-            else:
-                return "⏳ No clean setup"
+        # 🔴 SELL (mean reversion)
+        elif rsi > 70 and price <= ema50 * 1.005:
+            signal = "SELL"
 
         else:
-            if near_support:
-                return "🚫 Near Support - Skip"
+            signal = "HOLD"
+            warning = "⚠️ No clean setup → WAIT"
 
-            if (39 < rsi < 47 and rsi_down
-                and macd < macd_signal and strong_macd and macd_aligned
-                and strong_momentum and clean_trend
-                and entry_ok and pullback_ok
-                and stable_market):
+        # ================= DISPLAY =================
 
-                signal_type = "🔥 STRONG SELL (SNIPER)"
-                action = f"🔴 SELL @ {round(price,5)}"
-
-            elif (35 < rsi < 50 and rsi_down
-                  and macd < macd_signal
-                  and macd_strength > 0.00006
-                  and clean_trend):
-
-                signal_type = "⚡ QUICK SELL"
-                action = f"🔴 SELL @ {round(price,5)}"
-            else:
-                return "⏳ No clean setup"
-
-        expiration = {
-            "1m": "2-3 minutes",
-            "5m": "5-10 minutes",
-            "15m": "15-30 minutes"
-        }[timeframe]
-
-        amount = get_trade_amount()
-        timing = get_entry_timing(timeframe)
+        if signal == "BUY":
+            signal_display = "🟢 BUY (CALL)"
+        elif signal == "SELL":
+            signal_display = "🔴 SELL (PUT)"
+        else:
+            signal_display = "🟡 HOLD"
 
         return f"""
-📊 Sigma AI SNIPER PRO v8
+📊 Sigma AI Smart Signal
 
 💱 Pair: {pair}
-⏱ TF: {timeframe}
-📊 HTF Confirm: {higher_tf}
+⏱ Timeframe: {timeframe}
 
-{signal_type}
-{action}
-{timing}
+📈 Signal: {signal_display}
 
-🎯 Mode: MTF + S/R Sniper
+{warning}
 
-💰 Amount: {amount}
-📉 Martingale: {MARTINGALE_STEP}
+🧠 Strategy:
+• Mean Reversion (No Chase)
+• RSI + EMA50 Filter
 
-⏳ Expiration: {expiration}
+📊 Indicators:
+RSI: {round(rsi,2)}
+EMA50: {round(ema50,2)}
+Price: {round(price,5)}
 
-📊 Trend: {trend} (HTF: {htf_trend})
-📊 RSI: {round(rsi,2)}
-📊 MACD: {'Bullish' if macd > macd_signal else 'Bearish'}
-📊 Market: {'Stable' if stable_market else 'Volatile'}
+⛔ Avoid trading during strong trends!
 """
+
     except Exception as e:
-        print(e)
-        return "❌ Error"
-        
+        print("ERROR:", e)
+        return "❌ Failed to fetch data"
+
+# ================= HANDLERS =================
+
+from telegram import ReplyKeyboardMarkup
+
+from telegram.ext import MessageHandler, filters
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ALLOWED_USERS:
-        await update.message.reply_text("❌ Not authorized")
+    user_id = update.effective_user.id
+
+    if user_id not in ALLOWED_USERS:
+        await update.message.reply_text("⛔ Access Denied")
         return
-    await update.message.reply_text("🚀 Bot Started (BALANCED MODE)", reply_markup=main_menu())
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text.lower() in ["start bot", "🚀 start bot"]:
-        await start(update, context)
+    keyboard = [["🚀 Start Bot"]]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global WIN, LOSS
+    await update.message.reply_text(
+        "👋 Welcome! Click below to start:",
+        reply_markup=reply_markup
+    )
+async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id  # 👈 ADD THIS
 
+    # 🔒 BLOCK UNAUTHORIZED USERS
+    if user_id not in ALLOWED_USERS:
+        return
+
+    if update.message.text == "🚀 Start Bot":
+        await update.message.reply_text(
+            "🚀 Welcome to Sigma AI Bot",
+            reply_markup=main_menu()
+        )
+
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    user_id = query.from_user.id   # 👈 ADD THIS
+
+    # 🔒 BLOCK UNAUTHORIZED USERS
+    if user_id not in ALLOWED_USERS:
+        await query.answer("⛔ Access Denied", show_alert=True)
+        return
+
     await query.answer()
+
     data = query.data
 
-    if data == "result_win":
-        WIN += 1
-        reset_martingale()
-        await query.edit_message_text(f"✅ WIN\n\nWins: {WIN}\nLoss: {LOSS}")
-
-    elif data == "result_loss":
-        LOSS += 1
-        increase_martingale()
-        await query.edit_message_text(f"❌ LOSS\n\nWins: {WIN}\nLoss: {LOSS}\nMartingale: {MARTINGALE_STEP}")
-
-    elif data == "forex":
-        await query.edit_message_text("Choose Forex:", reply_markup=forex_menu())
-
-    elif data == "crypto":
-        await query.edit_message_text("Choose Crypto:", reply_markup=crypto_menu())
-
-    elif data == "back_main":
-        await query.edit_message_text("Main Menu:", reply_markup=main_menu())
-
-    elif data == "back_forex":
-        await query.edit_message_text("Choose Forex:", reply_markup=forex_menu())
+    if data == "forex":
+        await query.edit_message_text("Select Pair:", reply_markup=forex_menu())
 
     elif data in PAIRS:
-        await query.edit_message_text(f"Select TF {data}", reply_markup=timeframe_menu(data))
-
-    elif data.startswith("crypto_"):
-        pair = data.replace("crypto_", "")
-        await query.edit_message_text(f"Select TF {pair}", reply_markup=timeframe_menu(pair))
+        await query.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu(data))
 
     elif "_" in data:
         pair, tf = data.split("_")
+
         result = generate_signal(pair, tf)
-        await query.edit_message_text(result, parse_mode="Markdown", reply_markup=result_buttons())
+
+        await query.edit_message_text(result)
+
+    elif data == "back_main":
+        await query.edit_message_text(
+        "🚀 Welcome to Sigma AI Bot",
+        reply_markup=main_menu()
+    )
+
+    elif data == "back_forex":
+        await query.edit_message_text(
+        "Select Pair:",
+        reply_markup=forex_menu()
+    )
+
+# ================= RUN =================
 
 app = ApplicationBuilder().token(TOKEN).build()
 
-app.job_queue.run_repeating(session_notifier, interval=300, first=10)
-
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(handle_buttons))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+app.add_handler(CallbackQueryHandler(button_handler))
+app.add_handler(MessageHandler(filters.TEXT, start_button))
 
+print("Bot running...")
 app.run_polling()
+                    
     
