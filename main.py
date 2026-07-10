@@ -36,23 +36,24 @@ def get_entry_timing(timeframe):
     if timeframe == "1m":
         total_seconds = 60
         seconds_passed = now.second
-
     elif timeframe == "5m":
         total_seconds = 300
         seconds_passed = (now.minute % 5) * 60 + now.second
-
     elif timeframe == "15m":
         total_seconds = 900
         seconds_passed = (now.minute % 15) * 60 + now.second
+    else:
+        total_seconds = 60
+        seconds_passed = now.second
 
     remaining = total_seconds - seconds_passed
 
     if remaining > total_seconds * 0.6:
         return f"⏳ WAIT ({remaining}s left in candle)"
-    elif remaining > total_seconds * 0.2:
+    elif remaining > total_seconds * 0.15:
         return f"⚠️ PREPARE ({remaining}s)"
     else:
-        return f"🚀 Perfect Timing ({remaining}s to new candle)"
+        return f"🔥 ENTER NOW ({remaining}s to new candle)"
 
 # === SESSION DETECTION ===
 def get_trading_session():
@@ -71,13 +72,15 @@ def get_trading_session():
 # === AUTO SESSION NOTIFIER ===
 async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
     session = get_trading_session()
-
     if session:
         for user_id in ALLOWED_USERS:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=f"{session}\n\n💡 Market is active — spam mode ON!"
-            )
+            try:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"{session}\n\n💡 Market is active — look for sniper entries!"
+                )
+            except Exception:
+                pass
 
 # === RESULT BUTTONS ===
 def result_buttons():
@@ -89,13 +92,12 @@ def result_buttons():
     ])
 
 PAIRS = [
-    "EURUSD",
-    "GBPUSD",
-    "EURGBP",
-    "GBPJPY",
-    "USDJPY",
-    "XAUUSD"
-    ]
+    "EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD",
+    "EURJPY","GBPJPY","AUDJPY","CADJPY","CHFJPY",
+    "EURGBP","EURCHF","EURAUD","EURCAD",
+    "GBPAUD","GBPCAD","GBPCHF",
+    "AUDCAD","AUDCHF","CADCHF"
+]
 
 CRYPTO_PAIRS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]
 
@@ -144,7 +146,20 @@ def get_analysis(symbol, interval):
     )
     return handler.get_analysis()
 
-# === IMPROVED SIGNAL GENERATION (BALANCED MODE) ===
+# === OPTIMIZED AGGRESSIVE FILTERS ===
+def rejection_wick(open_p, close_p, high, low):
+    body = abs(close_p - open_p)
+    if body == 0: body = 0.00001
+    upper_wick = high - max(open_p, close_p)
+    lower_wick = min(open_p, close_p) - low
+    # Lowered threshold from 2.0 to 1.3 to capture high-velocity rejection flips early
+    return upper_wick > body * 1.3 or lower_wick > body * 1.3
+
+def is_no_trade_zone(rsi, price, ema, high, low):
+    # Tightened from 45-55 to 47-53 so the bot doesn't choke during standard consolidation
+    mid_rsi = 47 < rsi < 53
+    small_candle = (high - low) / price < 0.0004
+    return mid_rsi and small_candle
 
 def generate_signal(pair, timeframe):
     try:
@@ -154,60 +169,63 @@ def generate_signal(pair, timeframe):
             "15m": Interval.INTERVAL_15_MINUTES
         }
 
+        # Session protection retained for accuracy, but window extended slightly
         hour = datetime.datetime.utcnow().hour
-        if not (7 <= hour <= 22):
-            return "⛔ Trade only London/New York session"
+        if not (6 <= hour <= 23):
+            return "⛔ Market volumes low. Wait for London/NY Sessions."
 
         analysis = get_analysis(pair, interval_map[timeframe])
 
         rsi = analysis.indicators["RSI"]
         ema50 = analysis.indicators["EMA50"]
-        ema9 = analysis.indicators.get("EMA9", ema50)
-        ema21 = analysis.indicators.get("EMA21", ema50)
-
         price = analysis.indicators["close"]
+        open_price = analysis.indicators["open"]
+        high = analysis.indicators["high"]
+        low = analysis.indicators["low"]
 
-        macd = analysis.indicators.get("MACD.macd", 0)
-        macd_signal = analysis.indicators.get("MACD.signal", 0)
+        if is_no_trade_zone(rsi, price, ema50, high, low):
+            return "⏳ Market flat (No-Trade Zone). Scanning next asset..."
 
+        # Trend Determination via EMA50
         trend = "UP" if price > ema50 else "DOWN"
+        wick_reject = rejection_wick(open_price, price, high, low)
+        
+        signal = None
+        confidence = 4
 
-        # 🔥 MOMENTUM STRENGTH
-        distance = abs(price - ema50)
-        strength_threshold = price * 0.0005
-        strong_momentum = distance > strength_threshold
-
-        # 🔥 MICRO TREND
-        micro_up = ema9 > ema21
-        micro_down = ema9 < ema21
-
+        # HIGH FREQUENCY SCALPING ENGINE (RSI Overbought/Oversold + Trend Confluence)
         if trend == "UP":
-            if 45 < rsi < 70 and macd > macd_signal and strong_momentum and micro_up:
-                result = f"🔥 ULTRA BUY\n🟢 BUY @ {round(price,5)}"
-            elif macd > macd_signal and micro_up:
-                result = f"⚡ STRONG BUY\n🟢 BUY @ {round(price,5)}"
-            else:
-                result = f"📈 QUICK BUY\n🟢 BUY @ {round(price,5)}"
+            # Pullback entry: Asset is in an uptrend, but short term oversold or shows dynamic rejection floor
+            if rsi < 42 or (rsi < 50 and wick_reject):
+                signal = "BUY"
+                if rsi < 35: confidence += 1
+                if wick_reject: confidence += 1
+        elif trend == "DOWN":
+            # Rally short entry: Asset is in a downtrend, but short term overbought or shows dynamic rejection ceiling
+            if rsi > 58 or (rsi > 50 and wick_reject):
+                signal = "SELL"
+                if rsi > 65: confidence += 1
+                if wick_reject: confidence += 1
 
-        else:
-            if 30 < rsi < 55 and macd < macd_signal and strong_momentum and micro_down:
-                result = f"🔥 ULTRA SELL\n🔴 SELL @ {round(price,5)}"
-            elif macd < macd_signal and micro_down:
-                result = f"⚡ STRONG SELL\n🔴 SELL @ {round(price,5)}"
-            else:
-                result = f"📉 QUICK SELL\n🔴 SELL @ {round(price,5)}"
+        if not signal:
+            return "⏳ Setup forming... Re-query in a few seconds."
 
         expiration = {
-            "1m": "2-3 minutes",
-            "5m": "5-10 minutes",
-            "15m": "15-30 minutes"
-        }[timeframe]
+            "1m": "1-3 minutes",
+            "5m": "5 minutes",
+            "15m": "15 minutes"
+        }.get(timeframe, "2 minutes")
+
+        if signal == "BUY":
+            result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🟢 BUY @ {round(price,5)}"
+        else:
+            result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🔴 SELL @ {round(price,5)}"
 
         amount = get_trade_amount()
         timing = get_entry_timing(timeframe)
 
         return f"""
-📊 Sigma AI SMART MODE v3
+📊 Sigma AI ELITE SNIPER
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -215,7 +233,7 @@ def generate_signal(pair, timeframe):
 {result}
 {timing}
 
-⚡ Mode: HIGH ACCURACY ENGINE
+🔥 Confidence: {confidence}/6
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
@@ -224,20 +242,17 @@ def generate_signal(pair, timeframe):
 
 📊 RSI: {round(rsi,2)}
 📊 Trend: {trend}
-📊 MACD: {'Bullish' if macd > macd_signal else 'Bearish'}
-📊 Strength: {'Strong' if strong_momentum else 'Weak'}
-📊 Micro Trend: {'UP' if micro_up else 'DOWN'}
 """
 
     except Exception as e:
-        print(e)
-        return "❌ Error"
-               
+        print(f"Error generating signal: {e}")
+        return "❌ Error calculating technical data. Try again."
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
         return
-    await update.message.reply_text("🚀 Bot Started (BALANCED MODE)", reply_markup=main_menu())
+    await update.message.reply_text("🚀 Bot Started", reply_markup=main_menu())
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text.lower() in ["start bot", "🚀 start bot"]:
@@ -286,6 +301,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 app = ApplicationBuilder().token(TOKEN).build()
 
+# ✅ RUN SESSION NOTIFIER
 app.job_queue.run_repeating(session_notifier, interval=300, first=10)
 
 app.add_handler(CommandHandler("start", start))
@@ -293,5 +309,4 @@ app.add_handler(CallbackQueryHandler(handle_buttons))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
 app.run_polling()
-
-    
+            
