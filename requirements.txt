@@ -1,4 +1,3 @@
-pyTelegramBotAPI
+python-telegram-bot==20.7
 pandas
-pandas-ta
-git+https://github.com/StreamAlpha/tvdatafeed.git
+requests
