@@ -169,10 +169,9 @@ def generate_signal(pair, timeframe):
             "15m": Interval.INTERVAL_15_MINUTES
         }
 
-        # Session protection retained for accuracy, but window extended slightly
         hour = datetime.datetime.utcnow().hour
-        if not (6 <= hour <= 23):
-            return "⛔ Market volumes low. Wait for London/NY Sessions."
+        if not (7 <= hour <= 22):
+            return "⛔ Trade only London/New York session"
 
         analysis = get_analysis(pair, interval_map[timeframe])
 
@@ -183,38 +182,57 @@ def generate_signal(pair, timeframe):
         high = analysis.indicators["high"]
         low = analysis.indicators["low"]
 
-        if is_no_trade_zone(rsi, price, ema50, high, low):
-            return "⏳ Market flat (No-Trade Zone). Scanning next asset..."
+        prev_open = open_price
+        prev_close = price
 
-        # Trend Determination via EMA50
+        # Softer no-trade zone
+        if is_no_trade_zone(rsi, price, ema50, high, low):
+            # Reduced strictness
+            small_candle = (high - low) / price < 0.0012
+            flat_ema = abs(price - ema50) / price < 0.0008
+            if small_candle and flat_ema and 48 < rsi < 52:
+                return "⛔ No Trade Zone (choppy market)"
+
         trend = "UP" if price > ema50 else "DOWN"
+
+        # Softer fake breakout
+        if is_fake_breakout(open_price, price, high, low) and (high - low) / price > 0.003:
+            return "⛔ Fake breakout"
+
+        support = low
+        resistance = high
+
+        # More aggressive proximity
+        near_support = abs(price - support) / price < 0.004
+        near_resistance = abs(price - resistance) / price < 0.004
+
+        signal = None
+
+        engulf = detect_engulfing(open_price, price, prev_open, prev_close)
         wick_reject = rejection_wick(open_price, price, high, low)
         
-        signal = None
-        confidence = 4
+        # New RSI momentum boost
+        rsi_momentum = (trend == "UP" and rsi < 65) or (trend == "DOWN" and rsi > 35)
 
-        # HIGH FREQUENCY SCALPING ENGINE (RSI Overbought/Oversold + Trend Confluence)
-        if trend == "UP":
-            # Pullback entry: Asset is in an uptrend, but short term oversold or shows dynamic rejection floor
-            if rsi < 42 or (rsi < 50 and wick_reject):
-                signal = "BUY"
-                if rsi < 35: confidence += 1
-                if wick_reject: confidence += 1
-        elif trend == "DOWN":
-            # Rally short entry: Asset is in a downtrend, but short term overbought or shows dynamic rejection ceiling
-            if rsi > 58 or (rsi > 50 and wick_reject):
-                signal = "SELL"
-                if rsi > 65: confidence += 1
-                if wick_reject: confidence += 1
+        if trend == "UP" and near_support and (engulf or wick_reject or rsi_momentum):
+            signal = "BUY"
+        elif trend == "DOWN" and near_resistance and (engulf or wick_reject or rsi_momentum):
+            signal = "SELL"
 
         if not signal:
-            return "⏳ Setup forming... Re-query in a few seconds."
+            return "⏳ Waiting for sniper setup"
 
         expiration = {
-            "1m": "1-3 minutes",
-            "5m": "5 minutes",
-            "15m": "15 minutes"
-        }.get(timeframe, "2 minutes")
+            "1m": "2-3 minutes",
+            "5m": "5-10 minutes",
+            "15m": "15-30 minutes"
+        }[timeframe]
+
+        # Improved confidence
+        confidence = 4
+        if engulf: confidence += 1
+        if wick_reject: confidence += 1
+        if rsi_momentum: confidence += 1
 
         if signal == "BUY":
             result = f"🔥 ENTER NOW (SNIPER ENTRY)\n🟢 BUY @ {round(price,5)}"
@@ -225,7 +243,7 @@ def generate_signal(pair, timeframe):
         timing = get_entry_timing(timeframe)
 
         return f"""
-📊 Sigma AI ELITE SNIPER
+📊 **Sigma AI ELITE SNIPER** (Aggressive Mode)
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -233,21 +251,19 @@ def generate_signal(pair, timeframe):
 {result}
 {timing}
 
-🔥 Confidence: {confidence}/6
+🔥 Confidence: {confidence}/7
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
 
 ⏳ Expiration: {expiration}
 
-📊 RSI: {round(rsi,2)}
-📊 Trend: {trend}
+📊 RSI: {round(rsi,2)} | Trend: {trend}
 """
-
     except Exception as e:
-        print(f"Error generating signal: {e}")
-        return "❌ Error calculating technical data. Try again."
-
+        print(e)
+        return "❌ Error fetching data"
+    
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
