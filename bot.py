@@ -18,12 +18,14 @@ tv = TvDatafeed(TV_USER, TV_PASS) if TV_USER else TvDatafeed()
 # User session tracking
 user_sessions = {}
 
-# Mappings for user-friendly UI to API codes
+# --- CONFIGURATION (FOREX FOCUS) ---
 PAIRS = {
-    "BTCUSDT (Binance)": {"symbol": "BTCUSDT", "exchange": "BINANCE"},
-    "ETHUSDT (Binance)": {"symbol": "ETHUSDT", "exchange": "BINANCE"},
-    "EURUSD (FX)": {"symbol": "EURUSD", "exchange": "FX_IDC"},
-    "GOLD (OANDA)": {"symbol": "XAUUSD", "exchange": "OANDA"}
+    "EUR/USD (Euro / US Dollar)": {"symbol": "EURUSD", "exchange": "FX_IDC"},
+    "GBP/USD (British Pound / US Dollar)": {"symbol": "GBPUSD", "exchange": "FX_IDC"},
+    "USD/JPY (US Dollar / Japanese Yen)": {"symbol": "USDJPY", "exchange": "FX_IDC"},
+    "AUD/USD (Australian Dollar / US Dollar)": {"symbol": "AUDUSD", "exchange": "FX_IDC"},
+    "USD/CAD (US Dollar / Canadian Dollar)": {"symbol": "USDCAD", "exchange": "FX_IDC"},
+    "EUR/GBP (Euro / British Pound)": {"symbol": "EURGBP", "exchange": "FX_IDC"}
 }
 
 TIMEFRAMES = {
