@@ -1,155 +1,144 @@
 import os
-import asyncio
-from telebot.async_telebot import AsyncTeleBot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import time
 import pandas as pd
-import ta
-import yfinance as yf
+import pandas_ta as ta  # Efficient indicator calculation
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from tvDatafeed import TvDatafeed, Interval
 
-# Environment Variables from Railway
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+# --- CONFIGURATION ---
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+# Optional: Hardcode your TradingView credentials if needed, or leave blank
+TV_USER = os.getenv("TV_USER", "")
+TV_PASS = os.getenv("TV_PASS", "")
 
-bot = AsyncTeleBot(TELEGRAM_TOKEN)
+bot = telebot.TeleBot(TOKEN)
+tv = TvDatafeed(TV_USER, TV_PASS) if TV_USER else TvDatafeed()
 
-# Temporary dictionary to store user selections
-USER_STATE = {}
+# User session tracking
+user_sessions = {}
 
-# Timeframe mapping to Yahoo Finance (1m, 2m, 5m intervals)
-TIMEFRAME_MAP = {
-    "1 Min": "1m",
-    "3 Mins": "2m", # yfinance uses 2m as closest liquid asset variant
-    "5 Mins": "5m"
+# Mappings for user-friendly UI to API codes
+PAIRS = {
+    "BTCUSDT (Binance)": {"symbol": "BTCUSDT", "exchange": "BINANCE"},
+    "ETHUSDT (Binance)": {"symbol": "ETHUSDT", "exchange": "BINANCE"},
+    "EURUSD (FX)": {"symbol": "EURUSD", "exchange": "FX_IDC"},
+    "GOLD (OANDA)": {"symbol": "XAUUSD", "exchange": "OANDA"}
 }
 
-# Mapping Pocket Option internal names to real-world Market symbols
-ASSET_MAP = {
-    "eurusd_otc": "EURUSD=X",
-    "gbpusdt_otc": "GBPUSD=X",
-    "audusd_otc": "AUDUSD=X",
-    "usdjpy_otc": "JPY=X"
+TIMEFRAMES = {
+    "1 Minute": Interval.in_1_minute,
+    "3 Minutes": Interval.in_3_minute,
+    "5 Minutes": Interval.in_5_minute,
+    "15 Minutes": Interval.in_15_minute
 }
 
-# --- MENU 1: Choose Pair ---
-@bot.message_handler(commands=['analyze', 'start'])
-async def start_manual_analysis(message):
+# --- BOT INTERACTION ---
+
+@bot.message_handler(commands=['start', 'scan'])
+def start_scan(message):
     chat_id = message.chat.id
-    USER_STATE[chat_id] = {}  # Reset state
+    user_sessions[chat_id] = {"symbol": None, "exchange": None, "interval": None, "scanning": False}
+    
+    markup = InlineKeyboardMarkup(row_width=1)
+    for name in PAIRS.keys():
+        markup.add(InlineKeyboardButton(name, callback_data=f"pair_{name}"))
+        
+    bot.send_message(chat_id, "⚡ **Scalper Bot** ⚡\nSelect a Pair to scan:", reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pair_"))
+def handle_pair(call):
+    chat_id = call.message.chat.id
+    pair_name = call.data.replace("pair_", "")
+    
+    user_sessions[chat_id]["symbol"] = PAIRS[pair_name]["symbol"]
+    user_sessions[chat_id]["exchange"] = PAIRS[pair_name]["exchange"]
     
     markup = InlineKeyboardMarkup(row_width=2)
-    pairs = ["eurusd_otc", "gbpusdt_otc", "audusd_otc", "usdjpy_otc"]
-    
-    buttons = [InlineKeyboardButton(pair.upper().replace("_OTC", " OTC"), callback_data=f"pair_{pair}") for pair in pairs]
-    markup.add(*buttons)
-    
-    await bot.send_message(chat_id, "📊 **Pocket Option Manual Analyzer**\n\nStep 1: Select an OTC Currency Pair:", reply_markup=markup, parse_mode="Markdown")
+    for tf_name in TIMEFRAMES.keys():
+        markup.add(InlineKeyboardButton(tf_name, callback_data=f"tf_{tf_name}"))
+        
+    bot.edit_message_text(f"Selected: *{pair_name}*\nNow choose a timeframe:", 
+                          chat_id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
-# --- MENU 2: Choose Timeframe ---
-@bot.callback_query_handler(func=lambda call: call.data.startswith('pair_'))
-async def handle_pair_selection(call):
+@bot.callback_query_handler(func=lambda call: call.data.startswith("tf_"))
+def handle_timeframe(call):
     chat_id = call.message.chat.id
-    selected_pair = call.data.replace("pair_", "")
+    tf_name = call.data.replace("tf_", "")
     
-    if chat_id not in USER_STATE:
-        USER_STATE[chat_id] = {}
-    USER_STATE[chat_id]['pair'] = selected_pair
+    user_sessions[chat_id]["interval"] = TIMEFRAMES[tf_name]
+    user_sessions[chat_id]["scanning"] = True
     
-    markup = InlineKeyboardMarkup(row_width=3)
-    buttons = [InlineKeyboardButton(tf_text, callback_data=f"tf_{tf_text}") for tf_text in TIMEFRAME_MAP.keys()]
-    markup.add(*buttons)
+    session = user_sessions[chat_id]
+    bot.edit_message_text(f"🚀 **Scanning Started!**\nTarget: `{session['symbol']}` ({session['exchange']})\nTimeframe: `{tf_name}`\n\nI will alert you here when a high-accuracy signal appears. To stop, type /stop.", 
+                          chat_id, call.message.message_id, parse_mode="Markdown")
     
-    await bot.answer_callback_query(call.id)
-    
-    await bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=call.message.message_id,
-        text=f"Selected Pair: **{selected_pair.upper().replace('_OTC', ' OTC')}**\n\nStep 2: Select the Timeframe:",
-        reply_markup=markup,
-        parse_mode="Markdown"
-    )
+    # Trigger scanner loop
+    run_scanner(chat_id)
 
-# --- STEP 3: Trigger Analysis ---
-@bot.callback_query_handler(func=lambda call: call.data.startswith('tf_'))
-async def handle_timeframe_selection(call):
-    chat_id = call.message.chat.id
-    tf_text = call.data.replace("tf_", "")
-    
-    if chat_id not in USER_STATE or 'pair' not in USER_STATE[chat_id]:
-        await bot.send_message(chat_id, "❌ Session expired. Please type /start again.")
-        return
-        
-    USER_STATE[chat_id]['timeframe_text'] = tf_text
-    USER_STATE[chat_id]['interval'] = TIMEFRAME_MAP[tf_text]
-    
-    pair = USER_STATE[chat_id]['pair']
-    
-    await bot.answer_callback_query(call.id)
-    
-    await bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=call.message.message_id,
-        text=f"⏳ Pulling live tracking data for **{pair.upper().replace('_OTC', ' OTC')}** ({tf_text})...\nAnalyzing indicators..."
-    )
-    
-    # Run data retrieval safely in the background threads
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, run_market_analysis, chat_id)
+@bot.message_handler(commands=['stop'])
+def stop_scan(message):
+    chat_id = message.chat.id
+    if chat_id in user_sessions:
+        user_sessions[chat_id]["scanning"] = False
+        bot.send_message(chat_id, "⏹️ Scanning stopped successfully.")
+    else:
+        bot.send_message(chat_id, "No active scanning session found.")
 
-# --- CORE STRATEGIC ANALYSIS ---
-def run_market_analysis(chat_id):
-    pair_key = USER_STATE[chat_id]['pair']
-    interval = USER_STATE[chat_id]['interval']
-    tf_text = USER_STATE[chat_id]['timeframe_text']
-    
-    ticker_symbol = ASSET_MAP.get(pair_key, "EURUSD=X")
+# --- SCALPING STRATEGY ENGINE ---
 
-    try:
-        # Download data directly from public streams instantly with zero cookies
-        ticker = yf.Ticker(ticker_symbol)
-        df = ticker.history(period="1d", interval=interval)
-        
-        if df is None or df.empty:
-            asyncio.run_coroutine_threadsafe(bot.send_message(chat_id, "⚠️ Failed to fetch feed data. Retrying..."), bot.loop)
-            return
-
-        # Clean column labels to fit technical indicator calculations
-        df.columns = [col.lower() for col in df.columns]
-
-        rsi = ta.momentum.RSIIndicator(close=df['close'], window=7).rsi()
-        macd = ta.trend.MACD(close=df['close'], window_fast=12, window_slow=26, window_sign=9)
-        
-        latest_rsi = rsi.iloc[-1]
-        latest_macd_diff = macd.macd_diff().iloc[-1]
-        current_price = df['close'].iloc[-1]
-        
-        signal = "⏳ NO CLEAR SIGNAL (Market Neutral)"
-        emoji = "⚪"
-        
-        if latest_rsi > 45 and latest_rsi < 65 and latest_macd_diff > 0:
-            signal = "CALL (BUY)"
-            emoji = "🟢"
-        elif latest_rsi < 55 and latest_rsi > 35 and latest_macd_diff < 0:
-            signal = "PUT (SELL)"
-            emoji = "🔴"
-
-        signal_message = (
-            f"🚨 **POCKET OPTION AUTOMATED SIGNAL** 🚨\n"
-            f"-------------------------------------\n"
-            f"📈 **Asset:** {pair_key.upper().replace('_OTC', ' OTC')}\n"
-            f"⏱️ **Timeframe:** {tf_text}\n"
-            f"💵 **Current Price:** {current_price:.5f}\n"
-            f"-------------------------------------\n"
-            f"⚡ **Action:** {emoji} **{signal}**\n"
-            f"⏳ **Expiration Recommendation:** {tf_text}\n\n"
-            f"ℹ️ _RSI: {latest_rsi:.1f} | MACD Diff: {latest_macd_diff:.5f}_"
-        )
-        
-        asyncio.run_coroutine_threadsafe(bot.send_message(chat_id, signal_message, parse_mode="Markdown"), bot.loop)
-        
-    except Exception as e:
-        asyncio.run_coroutine_threadsafe(bot.send_message(chat_id, f"❌ Engine Error: {str(e)}"), bot.loop)
-
-if __name__ == "__main__":
-    import nest_asyncio
-    nest_asyncio.apply()
-    print("🤖 Async Manual Telegram Signal Bot is running...")
-    asyncio.run(bot.infinity_polling())
+def run_scanner(chat_id):
+    while user_sessions.get(chat_id, {}).get("scanning", False):
+        session = user_sessions[chat_id]
+        try:
+            # Fetch last 100 bars for accurate indicator processing
+            df = tv.get_hist(
+                symbol=session["symbol"], 
+                exchange=session["exchange"], 
+                interval=session["interval"], 
+                n_bars=100
+            )
+            
+            if df is not None and not df.empty:
+                # Calculate indicators
+                df['EMA_9'] = ta.ema(df['close'], length=9)
+                df['EMA_21'] = ta.ema(df['close'], length=21)
+                df['RSI'] = ta.rsi(df['close'], length=14)
+                
+                # Extract the latest fully closed candle data
+                latest = df.iloc[-2] 
+                prev = df.iloc[-3]
+                
+                # Aggressive, High-Probability Conditions (Trend + Momentum Filter)
+                # BUY: Fast EMA crosses above Slow EMA AND RSI bounces out of oversold territory
+                buy_signal = (prev['EMA_9'] <= prev['EMA_21']) and (latest['EMA_9'] > latest['EMA_21']) and (latest['RSI'] > 40)
+                
+                # SELL: Fast EMA crosses below Slow EMA AND RSI drops out of overbought territory
+                sell_signal = (prev['EMA_9'] >= prev['EMA_21']) and (latest['EMA_9'] < latest['EMA_21']) and (latest['RSI'] < 60)
+                
+                if buy_signal:
+                    msg = (f"🟢 **SCALPING BUY SIGNAL** 🟢\n\n"
+                           f"Pair: `{session['symbol']}`\n"
+                           f"Price: `{latest['close']}`\n"
+                           f"RSI: `{round(latest['RSI'], 2)}`\n"
+                           f"🎯 *Target:* 1:1.5 Risk-to-Reward ratio\n"
+                           f"🛡️ *Stop Loss:* Just below recent swing low.")
+                    bot.send_message(chat_id, msg, parse_mode="Markdown")
+                    time.sleep(60) # Prevent duplicate alerts on the same candle
+                    
+                elif sell_signal:
+                    msg = (f"🔴 **SCALPING SELL SIGNAL** 🔴\n\n"
+                           f"Pair: `{session['symbol']}`\n"
+                           f"Price: `{latest['close']}`\n"
+                           f"RSI: `{round(latest['RSI'], 2)}`\n"
+                           f"🎯 *Target:* 1:1.5 Risk-to-Reward ratio\n"
+                           f"🛡️ *Stop Loss:* Just above recent swing high.")
+                    bot.send_message(chat_id, msg, parse_mode="Markdown")
+                    time.sleep(60)
+                    
+        except Exception as e:
+            print(f"Error fetching/processing data: {e}")
+            
+        # Sleep short intervals to poll fresh data on low timeframes (e.g., 1m/3m)
+        time.sleep(15)
+                
