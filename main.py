@@ -1,15 +1,13 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 from tradingview_ta import TA_Handler, Interval
-import logging
-
 import os
+import time
 
 TOKEN = os.getenv("TOKEN")
-ALLOWED_USERS = [6351041498]  # replace with your Telegram ID
+ALLOWED_USERS = [6351041498]
 
-# 🔥 ADD THIS RIGHT HERE
 PAIRS = [
     "EURUSD", "GBPUSD", "USDJPY", "AUDUSD",
     "USDCAD", "USDCHF", "NZDUSD",
@@ -24,8 +22,7 @@ PAIRS = [
 
 def main_menu():
     keyboard = [
-        [InlineKeyboardButton("📊 Forex", callback_data="forex")],
-        [InlineKeyboardButton("💰 Crypto", callback_data="crypto")]
+        [InlineKeyboardButton("📊 Forex", callback_data="forex")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -35,11 +32,8 @@ def forex_menu():
     row = []
 
     for i, pair in enumerate(PAIRS, 1):
-        display = pair[:3] + "/" + pair[3:]  # EURUSD → EUR/USD
-
-        row.append(
-            InlineKeyboardButton(display, callback_data=pair)
-        )
+        display = pair[:3] + "/" + pair[3:]
+        row.append(InlineKeyboardButton(display, callback_data=pair))
 
         if i % 2 == 0:
             keyboard.append(row)
@@ -48,9 +42,7 @@ def forex_menu():
     if row:
         keyboard.append(row)
 
-    keyboard.append([
-        InlineKeyboardButton("⬅️ Back", callback_data="back")
-    ])
+    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="back_main")])
 
     return InlineKeyboardMarkup(keyboard)
 
@@ -60,12 +52,11 @@ def timeframe_menu(pair):
         [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"),
          InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
         [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")],
-        
-        [InlineKeyboardButton("⬅️ Back", callback_data="back_forex")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="back_forex")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# ================= SIGNAL =================
+# ================= ANALYSIS =================
 
 def get_analysis(symbol, interval):
     handler = TA_Handler(
@@ -74,13 +65,13 @@ def get_analysis(symbol, interval):
         exchange="FX_IDC",
         interval=interval
     )
-
-    analysis = handler.get_analysis()
-    return analysis
+    return handler.get_analysis()
 
 
 def generate_signal(pair, timeframe):
     try:
+        from datetime import datetime
+
         interval_map = {
             "1m": Interval.INTERVAL_1_MINUTE,
             "5m": Interval.INTERVAL_5_MINUTES,
@@ -90,111 +81,117 @@ def generate_signal(pair, timeframe):
         analysis = get_analysis(pair, interval_map[timeframe])
 
         rsi = analysis.indicators["RSI"]
-        macd = analysis.indicators["MACD.macd"]
         ema50 = analysis.indicators["EMA50"]
+        ema200 = analysis.indicators.get("EMA200", ema50)
         price = analysis.indicators["close"]
+        high = analysis.indicators.get("high", price)
+        low = analysis.indicators.get("low", price)
 
-        # ================= STRATEGY LOGIC =================
+        # 🔥 Higher timeframe
+        htf = get_analysis(pair, Interval.INTERVAL_15_MINUTES)
+        htf_rsi = htf.indicators["RSI"]
 
         signal = "HOLD"
         warning = ""
+        entry_price = None
+        confidence = 0
 
-        # 🔥 Detect strong trend (avoid trading)
-        if abs(price - ema50) > (price * 0.002):  # far from EMA = strong trend
-            warning = "⚠️ Strong trend detected → DO NOT TRADE"
+        # ================= TREND =================
+        if ema50 > ema200:
+            trend = "UPTREND"
+        elif ema50 < ema200:
+            trend = "DOWNTREND"
+        else:
+            trend = "SIDEWAYS"
 
-        # 🟢 BUY (mean reversion)
-        elif rsi < 30 and price >= ema50 * 0.995:
+        # ================= NO TRADE ZONE =================
+        if 45 < rsi < 55:
+            return "🟡 HOLD\n⚠️ Market is ranging"
+
+        # ================= BUY =================
+        if trend == "UPTREND" and rsi < 35 and htf_rsi < 40:
             signal = "BUY"
+            entry_price = price
+            confidence = 80
 
-        # 🔴 SELL (mean reversion)
-        elif rsi > 70 and price <= ema50 * 1.005:
+        # ================= SELL =================
+        elif trend == "DOWNTREND" and rsi > 65 and htf_rsi > 60:
             signal = "SELL"
+            entry_price = price
+            confidence = 80
 
-        else:
-            signal = "HOLD"
-            warning = "⚠️ No clean setup → WAIT"
+        # ================= EXTRA FILTERS =================
+        if signal != "HOLD":
+            if abs(price - high) < 0.0003:
+                warning = "⚠️ Near resistance"
+                confidence -= 10
 
-        # ================= DISPLAY =================
+            if abs(price - low) < 0.0003:
+                warning = "⚠️ Near support"
+                confidence -= 10
 
-        if signal == "BUY":
-            signal_display = "🟢 BUY (CALL)"
-        elif signal == "SELL":
-            signal_display = "🔴 SELL (PUT)"
-        else:
-            signal_display = "🟡 HOLD"
+            if trend == "UPTREND" and htf_rsi > 70:
+                warning = "⚠️ HTF overbought"
+                confidence -= 15
+
+            if trend == "DOWNTREND" and htf_rsi < 30:
+                warning = "⚠️ HTF oversold"
+                confidence -= 15
+
+        # ================= TIME =================
+        now = datetime.utcnow()
+        seconds = now.second
+        remaining = 60 - seconds
+
+        # ================= RESULT =================
+        if signal == "HOLD":
+            return f"""
+🟡 HOLD
+📊 Trend: {trend}
+⏳ Next Candle: {remaining}s
+"""
 
         return f"""
-📊 Sigma AI Smart Signal
-
-💱 Pair: {pair}
-⏱ Timeframe: {timeframe}
-
-📈 Signal: {signal_display}
-
+📊 SIGNAL: {signal}
+💰 Entry: {entry_price}
+🔥 Confidence: {confidence}%
+📊 Trend: {trend}
+⏳ Next Candle: {remaining}s
 {warning}
-
-🧠 Strategy:
-• Mean Reversion (No Chase)
-• RSI + EMA50 Filter
-
-📊 Indicators:
-RSI: {round(rsi,2)}
-EMA50: {round(ema50,2)}
-Price: {round(price,5)}
-
-⛔ Avoid trading during strong trends!
 """
 
     except Exception as e:
-        print("ERROR:", e)
-        return "❌ Failed to fetch data"
+        return f"Error: {str(e)}"
+
 
 # ================= HANDLERS =================
 
-from telegram import ReplyKeyboardMarkup
-
-from telegram.ext import MessageHandler, filters
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-
-    if user_id not in ALLOWED_USERS:
+    if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("⛔ Access Denied")
         return
 
     keyboard = [["🚀 Start Bot"]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text("Click below:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
 
-    await update.message.reply_text(
-        "👋 Welcome! Click below to start:",
-        reply_markup=reply_markup
-    )
+
 async def start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id  # 👈 ADD THIS
-
-    # 🔒 BLOCK UNAUTHORIZED USERS
-    if user_id not in ALLOWED_USERS:
+    if update.effective_user.id not in ALLOWED_USERS:
         return
 
     if update.message.text == "🚀 Start Bot":
-        await update.message.reply_text(
-            "🚀 Welcome to Sigma AI Bot",
-            reply_markup=main_menu()
-        )
+        await update.message.reply_text("🚀 Sigma AI Bot", reply_markup=main_menu())
 
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    user_id = query.from_user.id   # 👈 ADD THIS
+    user_id = query.from_user.id
 
-    # 🔒 BLOCK UNAUTHORIZED USERS
     if user_id not in ALLOWED_USERS:
         await query.answer("⛔ Access Denied", show_alert=True)
         return
 
     await query.answer()
-
     data = query.data
 
     if data == "forex":
@@ -205,32 +202,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif "_" in data:
         pair, tf = data.split("_")
-
         result = generate_signal(pair, tf)
-
         await query.edit_message_text(result)
 
     elif data == "back_main":
-        await query.edit_message_text(
-        "🚀 Welcome to Sigma AI Bot",
-        reply_markup=main_menu()
-    )
+        await query.edit_message_text("🚀 Sigma AI Bot", reply_markup=main_menu())
 
     elif data == "back_forex":
-        await query.edit_message_text(
-        "Select Pair:",
-        reply_markup=forex_menu()
-    )
+        await query.edit_message_text("Select Pair:", reply_markup=forex_menu())
 
 # ================= RUN =================
 
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT, start_button))
+app.add_handler(CallbackQueryHandler(button_handler))
 
 print("Bot running...")
 app.run_polling()
-                    
-    
+        
