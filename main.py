@@ -1,9 +1,11 @@
 import logging
 import requests
+import os
+
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
-TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+TOKEN = os.getenv("TOKEN")
 
 # FAST DATA SOURCE (Binance)
 PAIR_MAP = {
