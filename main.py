@@ -204,6 +204,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("🚀 Sigma AI SNIPER Started!\nForex + Crypto + OTC", reply_markup=main_menu())
 
+async def handle_text(update, context):
+    text = update.message.text
+
+    await update.message.reply_text(f"You said: {text}")
+
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global WIN, LOSS
     query = update.callback_query
