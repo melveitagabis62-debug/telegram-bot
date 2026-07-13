@@ -199,16 +199,15 @@ def generate_otc_signal(pair, timeframe):
 
 # === BUTTON HANDLERS ===
 
-async def handle_text(update, context):
-    text = update.message.text
-
-    await update.message.reply_text(f"You said: {text}")
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
         return
     await update.message.reply_text("🚀 Sigma AI SNIPER Started!\nForex + Crypto + OTC", reply_markup=main_menu())
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text.lower() in ["start", "start bot", "🚀 start bot"]:
+        await start(update, context)
 
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global WIN, LOSS
