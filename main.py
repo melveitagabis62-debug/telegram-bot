@@ -29,7 +29,7 @@ def increase_martingale():
     global MARTINGALE_STEP
     MARTINGALE_STEP += 1
 
-# === ENTRY TIMING SYSTEM ===
+# === ENTRY TIMING ===
 def get_entry_timing(timeframe):
     now = datetime.datetime.utcnow()
     if timeframe == "1m":
@@ -38,39 +38,32 @@ def get_entry_timing(timeframe):
     elif timeframe == "5m":
         total_seconds = 300
         seconds_passed = (now.minute % 5) * 60 + now.second
-    elif timeframe == "15m":
+    else:
         total_seconds = 900
         seconds_passed = (now.minute % 15) * 60 + now.second
 
     remaining = total_seconds - seconds_passed
-    if remaining > total_seconds * 0.6:
-        return f"⏳ WAIT ({remaining}s left in candle)"
-    elif remaining > total_seconds * 0.2:
+    if remaining > total_seconds * 0.55:
+        return f"⏳ WAIT ({remaining}s left)"
+    elif remaining > total_seconds * 0.25:
         return f"⚠️ PREPARE ({remaining}s)"
     else:
-        return f"🔥 ENTER NOW ({remaining}s to new candle)"
+        return f"🔥 ENTER NOW ({remaining}s)"
 
-# === SESSION DETECTION ===
-def get_trading_session():
+# === SESSION NOTIFIER ===
+async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.datetime.utcnow()
     hour = now.hour
     if 7 <= hour < 13:
-        return "🇬🇧 London Session OPEN"
+        session = "🇬🇧 London Session OPEN"
     elif 13 <= hour < 17:
-        return "🔥 London-New York OVERLAP (BEST TIME)"
+        session = "🔥 London-New York OVERLAP (BEST TIME)"
     elif 17 <= hour < 22:
-        return "🇺🇸 New York Session OPEN"
+        session = "🇺🇸 New York Session OPEN"
     else:
-        return None
-
-async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
-    session = get_trading_session()
-    if session:
-        for user_id in ALLOWED_USERS:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=f"{session}\n\n💡 High-Accuracy Aggressive signals active!"
-            )
+        return
+    for user_id in ALLOWED_USERS:
+        await context.bot.send_message(chat_id=user_id, text=f"{session}\n\n💡 High-Accuracy signals active!")
 
 # === RESULT BUTTONS ===
 def result_buttons():
@@ -83,7 +76,10 @@ PAIRS = ["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD","EURJPY"
 CRYPTO_PAIRS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]
 
 def main_menu():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("📊 Forex", callback_data="forex")], [InlineKeyboardButton("💰 Crypto", callback_data="crypto")]])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Forex", callback_data="forex")],
+        [InlineKeyboardButton("💰 Crypto", callback_data="crypto")]
+    ])
 
 def forex_menu():
     keyboard, row = [], []
@@ -109,7 +105,8 @@ def crypto_menu():
 
 def timeframe_menu(pair):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"), InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
+        [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"),
+         InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
         [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")],
         [InlineKeyboardButton("⬅️ Back", callback_data="back_forex")]
     ])
@@ -123,79 +120,68 @@ def get_analysis(symbol, interval):
     )
     return handler.get_analysis()
 
-# === IMPROVED PATTERN DETECTION ===
-def detect_engulfing(open_p, close_p, prev_open, prev_close):
-    return (close_p > open_p and prev_close < prev_open and close_p > prev_open) or \
-           (close_p < open_p and prev_close > prev_open and close_p < prev_open)
-
-def rejection_wick(open_p, close_p, high, low):
-    body = abs(close_p - open_p)
-    upper = high - max(open_p, close_p)
-    lower = min(open_p, close_p) - low
-    return upper > body * 1.9 or lower > body * 1.9
-
+# === MAIN SIGNAL FUNCTION (Improved with better candle awareness) ===
 def generate_signal(pair, timeframe):
     try:
-        interval_map = {"1m": Interval.INTERVAL_1_MINUTE, "5m": Interval.INTERVAL_5_MINUTES, "15m": Interval.INTERVAL_15_MINUTES}
+        interval_map = {
+            "1m": Interval.INTERVAL_1_MINUTE,
+            "5m": Interval.INTERVAL_5_MINUTES,
+            "15m": Interval.INTERVAL_15_MINUTES
+        }
+        
         analysis = get_analysis(pair, interval_map[timeframe])
+        current = analysis.indicators
 
-        rsi = analysis.indicators.get("RSI", 50)
-        ema50 = analysis.indicators.get("EMA50", 0)
-        macd = analysis.indicators.get("MACD.macd", 0)
-        macd_signal = analysis.indicators.get("MACD.signal", 0)
-        stoch_k = analysis.indicators.get("Stoch.K", 50)
-
-        price = analysis.indicators["close"]
-        open_price = analysis.indicators["open"]
-        high = analysis.indicators["high"]
-        low = analysis.indicators["low"]
+        rsi = current.get("RSI", 50)
+        ema50 = current.get("EMA50", 0)
+        macd = current.get("MACD.macd", 0)
+        macd_signal = current.get("MACD.signal", 0)
+        
+        price = current["close"]
+        open_price = current["open"]
+        high = current["high"]
+        low = current["low"]
 
         trend = "UP" if price > ema50 else "DOWN"
-        engulf = detect_engulfing(open_price, price, open_price, price)  # Simplified for current candle
-        wick_reject = rejection_wick(open_price, price, high, low)
 
-        macd_bull = macd > macd_signal and macd > 0
-        macd_bear = macd < macd_signal and macd < 0
-        stoch_oversold = stoch_k < 30
-        stoch_overbought = stoch_k > 70
+        # Better pattern detection (uses current candle + approximation of previous)
+        body = abs(price - open_price)
+        engulf = (price > open_price and price > open_price * 1.001) or (price < open_price and price < open_price * 0.999)  # Strong body
+        wick_reject = (high - max(open_price, price) > body * 2.0) or (min(open_price, price) - low > body * 2.0)
 
-        near_support = abs(price - low) / max(price, 0.0001) < 0.006
-        near_resistance = abs(price - high) / max(price, 0.0001) < 0.006
+        near_support = abs(price - low) / price < 0.005
+        near_resistance = abs(price - high) / price < 0.005
 
         signal = None
         reasons = []
         confidence = 4
 
-        if trend == "UP":
-            if (near_support or macd_bull or stoch_oversold) and (engulf or wick_reject or (rsi < 68)):
+        if trend == "UP" and 38 < rsi < 65:
+            if (near_support or macd > macd_signal) and (engulf or wick_reject):
                 signal = "BUY"
-                if near_support: reasons.append("Support"); confidence += 1
-                if macd_bull: reasons.append("MACD"); confidence += 1
-                if stoch_oversold: reasons.append("Stoch"); confidence += 1
-                if engulf or wick_reject: confidence += 2
-        else:
-            if (near_resistance or macd_bear or stoch_overbought) and (engulf or wick_reject or (rsi > 32)):
+                reasons.append("Bullish Confluence")
+                confidence += 3
+        elif trend == "DOWN" and 35 < rsi < 62:
+            if (near_resistance or macd < macd_signal) and (engulf or wick_reject):
                 signal = "SELL"
-                if near_resistance: reasons.append("Resistance"); confidence += 1
-                if macd_bear: reasons.append("MACD"); confidence += 1
-                if stoch_overbought: reasons.append("Stoch"); confidence += 1
-                if engulf or wick_reject: confidence += 2
+                reasons.append("Bearish Confluence")
+                confidence += 3
 
-        if not signal or confidence < 6:
-            return "⏳ Waiting for high-probability setup"
+        if not signal or confidence < 7:
+            return "⏳ Waiting for high-probability sniper setup"
 
         expiration = {"1m": "1-3 minutes", "5m": "4-8 minutes", "15m": "12-25 minutes"}[timeframe]
         amount = get_trade_amount()
         timing = get_entry_timing(timeframe)
-        reason_str = " | ".join(reasons[:3])
+        reason_str = " | ".join(reasons)
 
         if signal == "BUY":
-            result = f"🔥 HIGH-ACCURACY ENTRY\n🟢 BUY @ {round(price,5)}"
+            result = f"🔥 HIGH-ACCURACY SNIPER\n🟢 BUY @ {round(price,5)}"
         else:
-            result = f"🔥 HIGH-ACCURACY ENTRY\n🔴 SELL @ {round(price,5)}"
+            result = f"🔥 HIGH-ACCURACY SNIPER\n🔴 SELL @ {round(price,5)}"
 
         return f"""
-📊 **Sigma AI ELITE SNIPER — Balanced Max**
+📊 **Sigma AI ELITE SNIPER — Balanced Max v2**
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -215,13 +201,14 @@ def generate_signal(pair, timeframe):
 """
     except Exception as e:
         print("Signal Error:", e)
-        return "❌ Temporary data error"
+        return "❌ Data error — try again"
 
+# === Bot Handlers ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
         return
-    await update.message.reply_text("🚀 Sigma AI SNIPER (Balanced Max Accuracy) Started!", reply_markup=main_menu())
+    await update.message.reply_text("🚀 Sigma AI SNIPER (Balanced Max v2) Started!", reply_markup=main_menu())
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text.lower() in ["start", "start bot", "🚀 start bot"]:
@@ -236,11 +223,11 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "result_win":
         WIN += 1
         reset_martingale()
-        await query.edit_message_text(f"✅ WIN\nWins: {WIN}\nLoss: {LOSS}")
+        await query.edit_message_text(f"✅ WIN\nWins: {WIN}\nLosses: {LOSS}")
     elif data == "result_loss":
         LOSS += 1
         increase_martingale()
-        await query.edit_message_text(f"❌ LOSS\nWins: {WIN}\nLoss: {LOSS}\nMartingale: {MARTINGALE_STEP}")
+        await query.edit_message_text(f"❌ LOSS\nWins: {WIN}\nLosses: {LOSS}\nMartingale: {MARTINGALE_STEP}")
 
     elif data == "forex":
         await query.edit_message_text("Choose Forex:", reply_markup=forex_menu())
@@ -256,10 +243,11 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pair = data.replace("crypto_", "")
         await query.edit_message_text(f"Select TF {pair}", reply_markup=timeframe_menu(pair))
     elif "_" in data:
-        pair, tf = data.split("_")
+        pair, tf = data.split("_", 1)
         result = generate_signal(pair, tf)
         await query.edit_message_text(result, parse_mode="Markdown", reply_markup=result_buttons())
 
+# === RUN BOT ===
 app = ApplicationBuilder().token(TOKEN).build()
 app.job_queue.run_repeating(session_notifier, interval=300, first=10)
 
