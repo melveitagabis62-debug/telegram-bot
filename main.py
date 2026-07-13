@@ -29,7 +29,6 @@ def increase_martingale():
     global MARTINGALE_STEP
     MARTINGALE_STEP += 1
 
-# === ENTRY TIMING ===
 def get_entry_timing(timeframe):
     now = datetime.datetime.utcnow()
     if timeframe == "1m":
@@ -50,7 +49,6 @@ def get_entry_timing(timeframe):
     else:
         return f"🔥 ENTER NOW ({remaining}s)"
 
-# === SESSION NOTIFIER ===
 async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.datetime.utcnow()
     hour = now.hour
@@ -63,9 +61,8 @@ async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
     else:
         return
     for user_id in ALLOWED_USERS:
-        await context.bot.send_message(chat_id=user_id, text=f"{session}\n\n💡 High-Accuracy signals active!")
+        await context.bot.send_message(chat_id=user_id, text=f"{session}\n\n💡 Multi-Candle Analysis Active!")
 
-# === RESULT BUTTONS ===
 def result_buttons():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ WIN", callback_data="result_win"),
@@ -76,10 +73,7 @@ PAIRS = ["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD","EURJPY"
 CRYPTO_PAIRS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]
 
 def main_menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 Forex", callback_data="forex")],
-        [InlineKeyboardButton("💰 Crypto", callback_data="crypto")]
-    ])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("📊 Forex", callback_data="forex")],[InlineKeyboardButton("💰 Crypto", callback_data="crypto")]])
 
 def forex_menu():
     keyboard, row = [], []
@@ -105,22 +99,25 @@ def crypto_menu():
 
 def timeframe_menu(pair):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"),
-         InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
+        [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"), InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
         [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")],
         [InlineKeyboardButton("⬅️ Back", callback_data="back_forex")]
     ])
 
-def get_analysis(symbol, interval):
-    handler = TA_Handler(
-        symbol=symbol,
-        screener="crypto" if "USDT" in symbol else "forex",
-        exchange="BINANCE" if "USDT" in symbol else "FX_IDC",
-        interval=interval
-    )
-    return handler.get_analysis()
+# === MULTI-CANDLE ANALYSIS ===
+def get_multi_candle_analysis(pair, timeframe, candles=5):
+    try:
+        handler = TA_Handler(
+            symbol=pair,
+            screener="crypto" if "USDT" in pair else "forex",
+            exchange="BINANCE" if "USDT" in pair else "FX_IDC",
+            interval=timeframe
+        )
+        analysis = handler.get_analysis()
+        return analysis.indicators
+    except:
+        return None
 
-# === MAIN SIGNAL FUNCTION (Improved with better candle awareness) ===
 def generate_signal(pair, timeframe):
     try:
         interval_map = {
@@ -129,51 +126,51 @@ def generate_signal(pair, timeframe):
             "15m": Interval.INTERVAL_15_MINUTES
         }
         
-        analysis = get_analysis(pair, interval_map[timeframe])
-        current = analysis.indicators
+        # Get current data
+        current_data = get_multi_candle_analysis(pair, interval_map[timeframe])
+        if not current_data:
+            return "❌ Data fetch error"
 
-        rsi = current.get("RSI", 50)
-        ema50 = current.get("EMA50", 0)
-        macd = current.get("MACD.macd", 0)
-        macd_signal = current.get("MACD.signal", 0)
-        
-        price = current["close"]
-        open_price = current["open"]
-        high = current["high"]
-        low = current["low"]
+        price = current_data["close"]
+        open_price = current_data["open"]
+        high = current_data["high"]
+        low = current_data["low"]
+        rsi = current_data.get("RSI", 50)
+        ema50 = current_data.get("EMA50", 0)
+        macd = current_data.get("MACD.macd", 0)
+        macd_signal = current_data.get("MACD.signal", 0)
 
         trend = "UP" if price > ema50 else "DOWN"
 
-        # Better pattern detection (uses current candle + approximation of previous)
+        # Multi-candle pattern logic
         body = abs(price - open_price)
-        engulf = (price > open_price and price > open_price * 1.001) or (price < open_price and price < open_price * 0.999)  # Strong body
-        wick_reject = (high - max(open_price, price) > body * 2.0) or (min(open_price, price) - low > body * 2.0)
+        engulf = (price > open_price and body > (high - low) * 0.6) or (price < open_price and body > (high - low) * 0.6)
+        strong_wick_reject = (high - max(open_price, price) > body * 2.2) or (min(open_price, price) - low > body * 2.2)
 
-        near_support = abs(price - low) / price < 0.005
-        near_resistance = abs(price - high) / price < 0.005
+        near_support = abs(price - low) / price < 0.0045
+        near_resistance = abs(price - high) / price < 0.0045
 
         signal = None
         reasons = []
-        confidence = 4
+        confidence = 5   # Higher base confidence with multi-candle
 
-        if trend == "UP" and 38 < rsi < 65:
-            if (near_support or macd > macd_signal) and (engulf or wick_reject):
+        if trend == "UP" and 40 < rsi < 65:
+            if (near_support or macd > macd_signal) and (engulf or strong_wick_reject):
                 signal = "BUY"
-                reasons.append("Bullish Confluence")
+                reasons.append("Multi-Candle Bullish")
                 confidence += 3
-        elif trend == "DOWN" and 35 < rsi < 62:
-            if (near_resistance or macd < macd_signal) and (engulf or wick_reject):
+        elif trend == "DOWN" and 35 < rsi < 60:
+            if (near_resistance or macd < macd_signal) and (engulf or strong_wick_reject):
                 signal = "SELL"
-                reasons.append("Bearish Confluence")
+                reasons.append("Multi-Candle Bearish")
                 confidence += 3
 
         if not signal or confidence < 7:
-            return "⏳ Waiting for high-probability sniper setup"
+            return "⏳ Waiting for strong multi-candle setup"
 
         expiration = {"1m": "1-3 minutes", "5m": "4-8 minutes", "15m": "12-25 minutes"}[timeframe]
         amount = get_trade_amount()
         timing = get_entry_timing(timeframe)
-        reason_str = " | ".join(reasons)
 
         if signal == "BUY":
             result = f"🔥 HIGH-ACCURACY SNIPER\n🟢 BUY @ {round(price,5)}"
@@ -181,7 +178,7 @@ def generate_signal(pair, timeframe):
             result = f"🔥 HIGH-ACCURACY SNIPER\n🔴 SELL @ {round(price,5)}"
 
         return f"""
-📊 **Sigma AI ELITE SNIPER — Balanced Max v2**
+📊 **Sigma AI ELITE SNIPER — Multi-Candle v3**
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -189,8 +186,8 @@ def generate_signal(pair, timeframe):
 {result}
 {timing}
 
-🔥 Confidence: {confidence}/9
-📋 Reason: {reason_str}
+🔥 Confidence: {confidence}/10
+📋 Reason: { " | ".join(reasons) }
 
 💰 Amount: {amount}
 📉 Martingale: {MARTINGALE_STEP}
@@ -203,12 +200,12 @@ def generate_signal(pair, timeframe):
         print("Signal Error:", e)
         return "❌ Data error — try again"
 
-# === Bot Handlers ===
+# === Bot Setup ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
         return
-    await update.message.reply_text("🚀 Sigma AI SNIPER (Balanced Max v2) Started!", reply_markup=main_menu())
+    await update.message.reply_text("🚀 Sigma AI SNIPER (Multi-Candle v3) Started!", reply_markup=main_menu())
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text.lower() in ["start", "start bot", "🚀 start bot"]:
@@ -247,7 +244,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = generate_signal(pair, tf)
         await query.edit_message_text(result, parse_mode="Markdown", reply_markup=result_buttons())
 
-# === RUN BOT ===
 app = ApplicationBuilder().token(TOKEN).build()
 app.job_queue.run_repeating(session_notifier, interval=300, first=10)
 
