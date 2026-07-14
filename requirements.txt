@@ -1,2 +1,3 @@
-python-telegram-bot[job-queue]
-tradingview_ta
+python-telegram-bot==13.15
+tradingview-ta==3.3.0
+asyncio
