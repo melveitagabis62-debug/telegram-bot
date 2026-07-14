@@ -1,11 +1,13 @@
 import asyncio
+import os
 from datetime import datetime
 from telegram import Bot
 from tradingview_ta import TA_Handler, Interval
 
+
 # ================= CONFIG =================
 TOKEN = os.getenv("TOKEN")
-CHAT_ID = "YOUR_CHAT_ID"
+CHAT_ID = os.getenv("CHAT_ID")
 
 PAIR = "EURUSD"
 TIMEFRAME = Interval.INTERVAL_5_MINUTES
