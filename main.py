@@ -1,255 +1,142 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
-from telegram.ext import MessageHandler, filters
-
+import asyncio
+from datetime import datetime
+from telegram import Bot
 from tradingview_ta import TA_Handler, Interval
-import logging
-import os
-import datetime
 
+# ================= CONFIG =================
 TOKEN = os.getenv("TOKEN")
-ALLOWED_USERS = [6351041498]
+CHAT_ID = "YOUR_CHAT_ID"
 
-# === TRACKING SYSTEM ===
-WIN = 0
-LOSS = 0
-MARTINGALE_STEP = 0
-MARTINGALE_ENABLED = True
+PAIR = "EURUSD"
+TIMEFRAME = Interval.INTERVAL_5_MINUTES
 
-def get_trade_amount(base=1):
-    if not MARTINGALE_ENABLED:
-        return base
-    return base * (2 ** MARTINGALE_STEP)
+SCAN_INTERVAL = 30  # seconds
+COOLDOWN = 300  # 5 minutes between signals
 
-def reset_martingale():
-    global MARTINGALE_STEP
-    MARTINGALE_STEP = 0
+# ================= INIT =================
+bot = Bot(token=TOKEN)
+last_signal_time = 0
 
-def increase_martingale():
-    global MARTINGALE_STEP
-    MARTINGALE_STEP += 1
+# ================= SESSION FILTER =================
+def is_trading_session():
+    hour = datetime.utcnow().hour
+    return 7 <= hour <= 22  # London + NY
 
-def get_entry_timing(timeframe):
-    now = datetime.datetime.utcnow()
-    if timeframe == "1m":
-        total_seconds = 60
-        seconds_passed = now.second
-    elif timeframe == "5m":
-        total_seconds = 300
-        seconds_passed = (now.minute % 5) * 60 + now.second
+# ================= ENTRY TIMING =================
+def get_entry_timing():
+    now = datetime.utcnow()
+    seconds = now.second
+
+    if seconds >= 50:
+        return "⏳ PREPARE (Almost new candle)"
+    elif seconds <= 5:
+        return "🚀 ENTER NOW (New candle)"
     else:
-        total_seconds = 900
-        seconds_passed = (now.minute % 15) * 60 + now.second
+        return "⌛ WAIT"
 
-    remaining = total_seconds - seconds_passed
-    if remaining > total_seconds * 0.55:
-        return f"⏳ WAIT ({remaining}s left)"
-    elif remaining > total_seconds * 0.25:
-        return f"⚠️ PREPARE ({remaining}s)"
-    else:
-        return f"🔥 ENTER NOW ({remaining}s)"
+# ================= ANALYSIS =================
+def get_analysis():
+    handler = TA_Handler(
+        symbol=PAIR,
+        screener="forex",
+        exchange="FX_IDC",
+        interval=TIMEFRAME
+    )
+    return handler.get_analysis()
 
-async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.datetime.utcnow()
-    hour = now.hour
-    if 7 <= hour < 13:
-        session = "🇬🇧 London Session OPEN"
-    elif 13 <= hour < 17:
-        session = "🔥 London-New York OVERLAP (BEST TIME)"
-    elif 17 <= hour < 22:
-        session = "🇺🇸 New York Session OPEN"
-    else:
-        return
-    for user_id in ALLOWED_USERS:
-        await context.bot.send_message(chat_id=user_id, text=f"{session}\n\n💡 Multi-Candle Analysis Active!")
-
-def result_buttons():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ WIN", callback_data="result_win"),
-         InlineKeyboardButton("❌ LOSS", callback_data="result_loss")]
-    ])
-
-PAIRS = ["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD","EURJPY","GBPJPY","AUDJPY","CADJPY","CHFJPY","EURGBP","EURCHF","EURAUD","EURCAD","GBPAUD","GBPCAD","GBPCHF","AUDCAD","AUDCHF","CADCHF"]
-CRYPTO_PAIRS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]
-
-def main_menu():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("📊 Forex", callback_data="forex")],[InlineKeyboardButton("💰 Crypto", callback_data="crypto")]])
-
-def forex_menu():
-    keyboard, row = [], []
-    for i, pair in enumerate(PAIRS, 1):
-        row.append(InlineKeyboardButton(pair[:3]+"/"+pair[3:], callback_data=pair))
-        if i % 2 == 0:
-            keyboard.append(row)
-            row = []
-    if row: keyboard.append(row)
-    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="back_main")])
-    return InlineKeyboardMarkup(keyboard)
-
-def crypto_menu():
-    keyboard, row = [], []
-    for i, pair in enumerate(CRYPTO_PAIRS, 1):
-        row.append(InlineKeyboardButton(pair.replace("USDT","/USDT"), callback_data=f"crypto_{pair}"))
-        if i % 2 == 0:
-            keyboard.append(row)
-            row = []
-    if row: keyboard.append(row)
-    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="back_main")])
-    return InlineKeyboardMarkup(keyboard)
-
-def timeframe_menu(pair):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1m", callback_data=f"{pair}_1m"), InlineKeyboardButton("5m", callback_data=f"{pair}_5m")],
-        [InlineKeyboardButton("15m", callback_data=f"{pair}_15m")],
-        [InlineKeyboardButton("⬅️ Back", callback_data="back_forex")]
-    ])
-
-# === MULTI-CANDLE ANALYSIS ===
-def get_multi_candle_analysis(pair, timeframe, candles=5):
+# ================= PRO SIGNAL ENGINE =================
+def generate_signal():
     try:
-        handler = TA_Handler(
-            symbol=pair,
-            screener="crypto" if "USDT" in pair else "forex",
-            exchange="BINANCE" if "USDT" in pair else "FX_IDC",
-            interval=timeframe
-        )
-        analysis = handler.get_analysis()
-        return analysis.indicators
+        analysis = get_analysis()
+        ind = analysis.indicators
+
+        price = ind["close"]
+        rsi = ind["RSI"]
+        ema20 = ind["EMA20"]
+        ema50 = ind["EMA50"]
+        macd = ind["MACD.macd"]
+        macd_signal = ind["MACD.signal"]
+
+        high = ind["high"]
+        low = ind["low"]
+        open_price = ind["open"]
+
+        body = abs(price - open_price)
+        candle_range = high - low
+
+        # ================= TREND =================
+        trend_up = price > ema50 and ema20 > ema50
+        trend_down = price < ema50 and ema20 < ema50
+
+        # ================= MOMENTUM =================
+        strong_buy = rsi > 55 and macd > macd_signal
+        strong_sell = rsi < 45 and macd < macd_signal
+
+        # ================= CANDLE QUALITY =================
+        strong_body = body > (candle_range * 0.5)
+        small_candle = candle_range < (price * 0.0005)
+
+        # ================= NO TRADE FILTER =================
+        if small_candle:
+            return None
+
+        # ================= SNIPER CONDITIONS =================
+        if trend_up and strong_buy and strong_body:
+            return "CALL"
+
+        if trend_down and strong_sell and strong_body:
+            return "PUT"
+
+        return None
+
     except:
         return None
 
-def generate_signal(pair, timeframe):
-    try:
-        interval_map = {
-            "1m": Interval.INTERVAL_1_MINUTE,
-            "5m": Interval.INTERVAL_5_MINUTES,
-            "15m": Interval.INTERVAL_15_MINUTES
-        }
-        
-        # Get current data
-        current_data = get_multi_candle_analysis(pair, interval_map[timeframe])
-        if not current_data:
-            return "❌ Data fetch error"
+# ================= AUTO LOOP =================
+async def auto_trade():
+    global last_signal_time
 
-        price = current_data["close"]
-        open_price = current_data["open"]
-        high = current_data["high"]
-        low = current_data["low"]
-        rsi = current_data.get("RSI", 50)
-        ema50 = current_data.get("EMA50", 0)
-        macd = current_data.get("MACD.macd", 0)
-        macd_signal = current_data.get("MACD.signal", 0)
+    while True:
+        try:
+            if not is_trading_session():
+                await asyncio.sleep(SCAN_INTERVAL)
+                continue
 
-        trend = "UP" if price > ema50 else "DOWN"
+            signal = generate_signal()
+            now = datetime.utcnow().timestamp()
 
-        # Multi-candle pattern logic
-        body = abs(price - open_price)
-        engulf = (price > open_price and body > (high - low) * 0.6) or (price < open_price and body > (high - low) * 0.6)
-        strong_wick_reject = (high - max(open_price, price) > body * 2.2) or (min(open_price, price) - low > body * 2.2)
+            if signal and (now - last_signal_time > COOLDOWN):
+                timing = get_entry_timing()
 
-        near_support = abs(price - low) / price < 0.0045
-        near_resistance = abs(price - high) / price < 0.0045
+                message = f"""
+🔥 PRO SNIPER SIGNAL 🔥
 
-        signal = None
-        reasons = []
-        confidence = 5   # Higher base confidence with multi-candle
+PAIR: {PAIR}
+TF: 5M
 
-        if trend == "UP" and 40 < rsi < 65:
-            if (near_support or macd > macd_signal) and (engulf or strong_wick_reject):
-                signal = "BUY"
-                reasons.append("Multi-Candle Bullish")
-                confidence += 3
-        elif trend == "DOWN" and 35 < rsi < 60:
-            if (near_resistance or macd < macd_signal) and (engulf or strong_wick_reject):
-                signal = "SELL"
-                reasons.append("Multi-Candle Bearish")
-                confidence += 3
-
-        if not signal or confidence < 7:
-            return "⏳ Waiting for strong multi-candle setup"
-
-        expiration = {"1m": "1-3 minutes", "5m": "4-8 minutes", "15m": "12-25 minutes"}[timeframe]
-        amount = get_trade_amount()
-        timing = get_entry_timing(timeframe)
-
-        if signal == "BUY":
-            result = f"🔥 HIGH-ACCURACY SNIPER\n🟢 BUY @ {round(price,5)}"
-        else:
-            result = f"🔥 HIGH-ACCURACY SNIPER\n🔴 SELL @ {round(price,5)}"
-
-        return f"""
-📊 **Sigma AI ELITE SNIPER — Multi-Candle v3**
-
-💱 Pair: {pair}
-⏱ TF: {timeframe}
-
-{result}
+SIGNAL: {signal}
 {timing}
 
-🔥 Confidence: {confidence}/10
-📋 Reason: { " | ".join(reasons) }
-
-💰 Amount: {amount}
-📉 Martingale: {MARTINGALE_STEP}
-
-⏳ Expiration: {expiration}
-
-📊 RSI: {round(rsi,1)} | Trend: {trend}
+⚡ Trade at correct timing only
+⚡ Avoid late entry
 """
-    except Exception as e:
-        print("Signal Error:", e)
-        return "❌ Data error — try again"
 
-# === Bot Setup ===
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ALLOWED_USERS:
-        await update.message.reply_text("❌ Not authorized")
-        return
-    await update.message.reply_text("🚀 Sigma AI SNIPER (Multi-Candle v3) Started!", reply_markup=main_menu())
+                await bot.send_message(chat_id=CHAT_ID, text=message)
+                last_signal_time = now
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text.lower() in ["start", "start bot", "🚀 start bot"]:
-        await start(update, context)
+        except Exception as e:
+            print("Error:", e)
 
-async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global WIN, LOSS
-    query = update.callback_query
-    await query.answer()
-    data = query.data
+        await asyncio.sleep(SCAN_INTERVAL)
 
-    if data == "result_win":
-        WIN += 1
-        reset_martingale()
-        await query.edit_message_text(f"✅ WIN\nWins: {WIN}\nLosses: {LOSS}")
-    elif data == "result_loss":
-        LOSS += 1
-        increase_martingale()
-        await query.edit_message_text(f"❌ LOSS\nWins: {WIN}\nLosses: {LOSS}\nMartingale: {MARTINGALE_STEP}")
+# ================= START COMMAND =================
+async def start_bot():
+    await bot.send_message(chat_id=CHAT_ID, text="✅ Bot is running (AUTO MODE ACTIVE)")
 
-    elif data == "forex":
-        await query.edit_message_text("Choose Forex:", reply_markup=forex_menu())
-    elif data == "crypto":
-        await query.edit_message_text("Choose Crypto:", reply_markup=crypto_menu())
-    elif data == "back_main":
-        await query.edit_message_text("Main Menu:", reply_markup=main_menu())
-    elif data == "back_forex":
-        await query.edit_message_text("Choose Forex:", reply_markup=forex_menu())
-    elif data in PAIRS:
-        await query.edit_message_text(f"Select TF {data}", reply_markup=timeframe_menu(data))
-    elif data.startswith("crypto_"):
-        pair = data.replace("crypto_", "")
-        await query.edit_message_text(f"Select TF {pair}", reply_markup=timeframe_menu(pair))
-    elif "_" in data:
-        pair, tf = data.split("_", 1)
-        result = generate_signal(pair, tf)
-        await query.edit_message_text(result, parse_mode="Markdown", reply_markup=result_buttons())
+# ================= MAIN =================
+async def main():
+    await start_bot()
+    await auto_trade()
 
-app = ApplicationBuilder().token(TOKEN).build()
-app.job_queue.run_repeating(session_notifier, interval=300, first=10)
-
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(handle_buttons))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
-app.run_polling()
-                                                       
+if __name__ == "__main__":
+    asyncio.run(main())
