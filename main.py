@@ -116,6 +116,14 @@ CONFLUENCE_TF = {
     "5m": Interval.INTERVAL_15_MINUTES,
     "15m": Interval.INTERVAL_1_HOUR,
 }
+# A further-out timeframe, checked in addition to CONFLUENCE_TF, so the
+# setup has a second independent chance to show real trend agreement
+# instead of leaning on just one higher timeframe.
+CONFLUENCE_TF2 = {
+    "1m": Interval.INTERVAL_15_MINUTES,
+    "5m": Interval.INTERVAL_1_HOUR,
+    "15m": Interval.INTERVAL_4_HOURS,
+}
 
 def get_analysis_obj(pair, interval):
     try:
@@ -181,16 +189,18 @@ def generate_signal(pair, timeframe):
             osc, ma = analysis.oscillators, analysis.moving_averages
             buy_votes = osc["BUY"] + ma["BUY"]
             sell_votes = osc["SELL"] + ma["SELL"]
+            votes_available = True
         except Exception:
             buy_votes = sell_votes = 0
+            votes_available = False
 
         bullish_bias = trend == "UP" and 35 < rsi < 70
         bearish_bias = trend == "DOWN" and 30 < rsi < 65
 
         signal = None
-        if bullish_bias and buy_votes >= sell_votes:
+        if bullish_bias and (not votes_available or buy_votes >= sell_votes):
             signal = "BUY"
-        elif bearish_bias and sell_votes >= buy_votes:
+        elif bearish_bias and (not votes_available or sell_votes >= buy_votes):
             signal = "SELL"
 
         if not signal:
@@ -203,14 +213,19 @@ def generate_signal(pair, timeframe):
         if strong_trend:
             reasons.append("ADX trend confirmed")
 
-        vote_gap = abs(buy_votes - sell_votes)
-        if vote_gap >= 4:
-            score += 2; reasons.append("Strong indicator consensus")
-        elif vote_gap >= 2:
-            score += 1; reasons.append("Indicator consensus")
+        if votes_available:
+            vote_gap = abs(buy_votes - sell_votes)
+            if vote_gap >= 4:
+                score += 2; reasons.append("Strong indicator consensus")
+            elif vote_gap >= 2:
+                score += 1; reasons.append("Indicator consensus")
 
-        if (signal == "BUY" and macd > macd_signal) or (signal == "SELL" and macd < macd_signal):
+        macd_hist = macd - macd_signal
+        macd_ok = (signal == "BUY" and macd_hist > 0) or (signal == "SELL" and macd_hist < 0)
+        if macd_ok:
             score += 1; reasons.append("MACD confirms")
+            if atr and abs(macd_hist) / max(atr, 1e-9) > 0.15:
+                score += 0.5; reasons.append("MACD momentum strong")
 
         if (signal == "BUY" and stoch_k > stoch_d) or (signal == "SELL" and stoch_k < stoch_d):
             score += 0.5
@@ -225,6 +240,10 @@ def generate_signal(pair, timeframe):
         higher_tf = CONFLUENCE_TF.get(timeframe)
         if higher_tf and get_trend_bias(pair, higher_tf) == trend:
             score += 1.5; reasons.append("Higher-TF trend agrees")
+
+        higher_tf2 = CONFLUENCE_TF2.get(timeframe)
+        if higher_tf2 and get_trend_bias(pair, higher_tf2) == trend:
+            score += 1; reasons.append("Macro-TF trend agrees")
 
         if atr and price and atr / price < 0.0008:
             score -= 1; reasons.append("Low volatility (reduced)")
@@ -317,3 +336,4 @@ app.add_handler(CallbackQueryHandler(handle_buttons))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
 app.run_polling()
+        
