@@ -209,7 +209,7 @@ def generate_signal(pair, timeframe):
         reasons = []
         score = 0.0
 
-        score += 1.5 if strong_trend else 0.5
+        score += min(adx, 40) / 40 * 1.5
         if strong_trend:
             reasons.append("ADX trend confirmed")
 
@@ -230,9 +230,22 @@ def generate_signal(pair, timeframe):
         if (signal == "BUY" and stoch_k > stoch_d) or (signal == "SELL" and stoch_k < stoch_d):
             score += 0.5
 
-        if (signal == "BUY" and (engulf and bullish_candle or wick_reject_up)) or \
-           (signal == "SELL" and (engulf and not bullish_candle or wick_reject_down)):
-            score += 1.5; reasons.append("Candle structure confirms")
+        plus_di, minus_di = ind.get("ADX+DI"), ind.get("ADX-DI")
+        if plus_di is not None and minus_di is not None:
+            if (signal == "BUY" and plus_di > minus_di) or (signal == "SELL" and minus_di > plus_di):
+                score += 1; reasons.append("Directional index confirms")
+
+        cci = ind.get("CCI20")
+        if cci is not None and ((signal == "BUY" and cci > 0) or (signal == "SELL" and cci < 0)):
+            score += 0.5; reasons.append("CCI aligns")
+
+        if (signal == "BUY" and bullish_candle) or (signal == "SELL" and not bullish_candle):
+            score += min(body_ratio, 1) * 1.2
+            if engulf:
+                reasons.append("Candle structure confirms")
+
+        if (signal == "BUY" and wick_reject_up) or (signal == "SELL" and wick_reject_down):
+            score += 0.8; reasons.append("Wick rejection")
 
         if (signal == "BUY" and near_lower_band) or (signal == "SELL" and near_upper_band):
             score += 1; reasons.append("At Bollinger extreme")
@@ -336,4 +349,4 @@ app.add_handler(CallbackQueryHandler(handle_buttons))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
 app.run_polling()
-        
+         
