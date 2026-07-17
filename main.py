@@ -1,7 +1,6 @@
 import os
 import asyncio
 import logging
-import pandas as pd
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from pocketoptionapi.stable_api import PocketOption
@@ -20,25 +19,70 @@ IS_DEMO = os.getenv("IS_DEMO", "True").lower() == "true"
 bot_active = False
 trading_task = None
 
-def calculate_strategy(candles_list):
-    """Calculates indicators on the last 20 candles and checks for signals"""
-    df = pd.DataFrame(candles_list)
-    if len(df) < 15:
-        return None, None, None
+def calculate_ema(values, span):
+    """Calculates Exponential Moving Average (matches Pandas EWM)"""
+    if not values:
+        return []
+    alpha = 2 / (span + 1)
+    ema_values = [values[0]]
+    for val in values[1:]:
+        ema_values.append(alpha * val + (1 - alpha) * ema_values[-1])
+    return ema_values
 
-    # 1. RSI 10 Calculation
-    delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=10).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=10).mean()
-    rs = gain / (loss + 1e-9) # avoid division by zero
-    df['rsi'] = 100 - (100 / (1 + rs))
+def calculate_rsi(closes, period=10):
+    """Calculates Relative Strength Index in pure Python"""
+    if len(closes) < period + 1:
+        return [50.0] * len(closes)
+    
+    deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+    gains = [d if d > 0 else 0.0 for d in deltas]
+    losses = [-d if d < 0 else 0.0 for d in deltas]
+    
+    rsi_values = [50.0] * period  # Fill initial values
+    for i in range(period - 1, len(deltas)):
+        avg_gain = sum(gains[i - period + 1 : i + 1]) / period
+        avg_loss = sum(losses[i - period + 1 : i + 1]) / period
+        if avg_loss == 0:
+            rsi_val = 100.0 if avg_gain > 0 else 50.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi_val = 100.0 - (100.0 / (1.0 + rs))
+        rsi_values.append(rsi_val)
+    return rsi_values
 
-    # 2. Williams Alligator (Stanley's simplified settings)
-    # Jaws: Period 10, Shift 5 | Lips: Period 3, Shift 1
-    df['jaws'] = df['close'].ewm(span=10, adjust=False).mean().shift(5)
-    df['lips'] = df['close'].ewm(span=3, adjust=False).mean().shift(1)
-
-    return df.iloc[-2], df.iloc[-1] # Return previous and current candle data
+def check_signals(candles_list):
+    """Parses raw candle prices and checks for indicator crossovers"""
+    if len(candles_list) < 20:
+        return False, False
+        
+    closes = [float(c["close"]) for c in candles_list]
+    
+    # Calculate indicators
+    ema_10 = calculate_ema(closes, 10)
+    ema_3 = calculate_ema(closes, 3)
+    rsi_values = calculate_rsi(closes, 10)
+    
+    # Williams Alligator (with shift offsets extracted manually)
+    curr_jaws = ema_10[-6]  # shift 5
+    prev_jaws = ema_10[-7]
+    
+    curr_lips = ema_3[-2]   # shift 1
+    prev_lips = ema_3[-3]
+    
+    curr_rsi = rsi_values[-1]
+    prev_rsi = rsi_values[-2]
+    
+    # 1. Bullish (BUY/Call) Crossover
+    bullish_crossover = (prev_lips <= prev_jaws) and (curr_lips > curr_jaws)
+    bullish_rsi = (prev_rsi <= 50) and (curr_rsi > 50)
+    buy_signal = bullish_crossover and bullish_rsi
+    
+    # 2. Bearish (SELL/Put) Crossover
+    bearish_crossover = (prev_lips >= prev_jaws) and (curr_lips < curr_jaws)
+    bearish_rsi = (prev_rsi >= 50) and (curr_rsi < 50)
+    sell_signal = bearish_crossover and bearish_rsi
+    
+    return buy_signal, sell_signal
 
 async def strategy_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Background engine checking the 30s chart for entries"""
@@ -47,7 +91,6 @@ async def strategy_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await context.bot.send_message(chat_id=chat_id, text="🔄 Connecting to Pocket Option...")
     
-    # Initialize connection using the SSID token
     api = PocketOption(ssid=POCKET_SSID)
     success, error = api.connect()
     
@@ -56,7 +99,6 @@ async def strategy_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bot_active = False
         return
 
-    # Set Demo or Real Account
     balance_type = "PRACTICE" if IS_DEMO else "REAL"
     api.change_balance(balance_type)
     initial_balance = api.get_balance()
@@ -66,36 +108,26 @@ async def strategy_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text=f"🟢 Bot Active! Platform: {balance_type}\nInitial Balance: ${initial_balance}"
     )
 
-    asset = "EURUSD_otc" # Example asset
+    asset = "EURUSD_otc"
     api.start_candles_stream(asset, 20)
 
     while bot_active:
         try:
             candles = api.get_realtime_candles(asset)
             if len(candles) >= 20:
-                # Format to a readable list of dicts with float close prices
-                formatted_candles = [{"close": float(c["close"])} for c in candles.values()]
-                prev_candle, curr_candle = calculate_strategy(formatted_candles)
+                # Sort candles chronologically by their timestamp keys
+                sorted_candles = [candles[k] for k in sorted(candles.keys())]
+                buy_signal, sell_signal = check_signals(sorted_candles)
                 
-                if prev_candle is not None:
-                    # Signal Logic: Check for bullish/bearish crossovers
-                    bullish_crossover = (prev_candle['lips'] <= prev_candle['jaws']) and (curr_candle['lips'] > curr_candle['jaws'])
-                    bullish_rsi = (prev_candle['rsi'] <= 50) and (curr_candle['rsi'] > 50)
-                    
-                    bearish_crossover = (prev_candle['lips'] >= prev_candle['jaws']) and (curr_candle['lips'] < curr_candle['jaws'])
-                    bearish_rsi = (prev_candle['rsi'] >= 50) and (curr_candle['rsi'] < 50)
+                if buy_signal:
+                    await context.bot.send_message(chat_id=chat_id, text="📈 BUY Signal Detected! Placing CALL trade...")
+                    api.buy(asset, TRADE_AMOUNT, "call", 60)
 
-                    # Trigger CALL (Buy)
-                    if bullish_crossover and bullish_rsi:
-                        await context.bot.send_message(chat_id=chat_id, text=f"📈 BUY Signal Detected! Placing CALL trade...")
-                        api.buy(asset, TRADE_AMOUNT, "call", 60) # 1-minute expiration
+                elif sell_signal:
+                    await context.bot.send_message(chat_id=chat_id, text="📉 SELL Signal Detected! Placing PUT trade...")
+                    api.buy(asset, TRADE_AMOUNT, "put", 60)
 
-                    # Trigger PUT (Sell)
-                    elif bearish_crossover and bearish_rsi:
-                        await context.bot.send_message(chat_id=chat_id, text=f"📉 SELL Signal Detected! Placing PUT trade...")
-                        api.buy(asset, TRADE_AMOUNT, "put", 60)
-
-            await asyncio.sleep(5) # Check state every 5 seconds
+            await asyncio.sleep(5)  # Check state every 5 seconds
         except Exception as e:
             logger.error(f"Error in strategy loop: {e}")
             await asyncio.sleep(10)
@@ -127,4 +159,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
+        
