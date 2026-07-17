@@ -1,2 +1,3 @@
-python-telegram-bot[job-queue]
-tradingview-ta
+python-telegram-bot==20.3
+pandas==2.0.3
+pocketoptionapi-async==2.0.1
