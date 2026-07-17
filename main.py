@@ -272,7 +272,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === RUN ===
 app = ApplicationBuilder().token(TOKEN).build()
 
-app.job_queue.run_repeating(session_notifier, interval=300, first=10)
+app.job_queue.run_repeating(session_notifier, interval=1200, first=10)
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(handle_buttons))
