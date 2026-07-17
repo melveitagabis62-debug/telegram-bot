@@ -3,7 +3,8 @@ import asyncio
 import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-from pocketoptionapi_async.stable_api import PocketOption
+from pocketoptionapi.stable_api import PocketOption
+
 
 
 # Setup logging
