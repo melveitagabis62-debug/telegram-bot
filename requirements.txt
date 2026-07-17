@@ -1,2 +1,2 @@
 python-telegram-bot==20.3
-pocketoptionapi
+git+https://github.com/G7-Dev/pocketoptionapi.git
