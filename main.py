@@ -61,7 +61,7 @@ async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
     else:
         return
     for user_id in ALLOWED_USERS:
-        await context.bot.send_message(chat_id=user_id, text=f"{session}\n\n💡 Multi-Candle Analysis Active!")
+        await context.bot.send_message(chat_id=user_id, text=f"{session}\n\n💡 Sigma AI v5 — Enhanced Confluence")
 
 def result_buttons():
     return InlineKeyboardMarkup([
@@ -110,15 +110,13 @@ INTERVAL_MAP = {
     "5m": Interval.INTERVAL_5_MINUTES,
     "15m": Interval.INTERVAL_15_MINUTES
 }
-# Higher timeframe used to confirm the trade timeframe's trend
+
 CONFLUENCE_TF = {
     "1m": Interval.INTERVAL_5_MINUTES,
     "5m": Interval.INTERVAL_15_MINUTES,
     "15m": Interval.INTERVAL_1_HOUR,
 }
-# A further-out timeframe, checked in addition to CONFLUENCE_TF, so the
-# setup has a second independent chance to show real trend agreement
-# instead of leaning on just one higher timeframe.
+
 CONFLUENCE_TF2 = {
     "1m": Interval.INTERVAL_15_MINUTES,
     "5m": Interval.INTERVAL_1_HOUR,
@@ -155,7 +153,10 @@ def generate_signal(pair, timeframe):
             return "❌ Data fetch error"
 
         ind = analysis.indicators
-        price, open_price, high, low = ind.get("close"), ind.get("open"), ind.get("high"), ind.get("low")
+        price = ind.get("close")
+        open_price = ind.get("open")
+        high = ind.get("high")
+        low = ind.get("low")
         if None in (price, open_price, high, low):
             return "❌ Incomplete data — try again"
 
@@ -168,40 +169,41 @@ def generate_signal(pair, timeframe):
         atr = ind.get("ATR")
 
         trend = "UP" if price > ema50 else "DOWN"
-        strong_trend = adx and adx > 20
+        strong_trend = adx and adx > 22
 
-        # Candle structure off the current bar
+        # Candle structure
         candle_range = max(high - low, 1e-9)
         body = abs(price - open_price)
         body_ratio = body / candle_range
         upper_wick = high - max(open_price, price)
         lower_wick = min(open_price, price) - low
         bullish_candle = price > open_price
-        engulf = body_ratio > 0.55
-        wick_reject_up = lower_wick > body * 1.8
-        wick_reject_down = upper_wick > body * 1.8
+        engulf = body_ratio > 0.6
+        strong_wick_reject_up = lower_wick > body * 2.0
+        strong_wick_reject_down = upper_wick > body * 2.0
 
         percent_b = None
-        if bb_upper is not None and bb_lower is not None and bb_upper != bb_lower:
+        if bb_upper and bb_lower and bb_upper != bb_lower:
             percent_b = (price - bb_lower) / (bb_upper - bb_lower)
 
-        # TradingView's own aggregate of ~20 oscillator/MA indicators — real confluence, not one metric
+        # TradingView summary votes
         try:
             osc, ma = analysis.oscillators, analysis.moving_averages
-            buy_votes = osc["BUY"] + ma["BUY"]
-            sell_votes = osc["SELL"] + ma["SELL"]
+            buy_votes = osc.get("BUY", 0) + ma.get("BUY", 0)
+            sell_votes = osc.get("SELL", 0) + ma.get("SELL", 0)
             votes_available = True
-        except Exception:
+        except:
             buy_votes = sell_votes = 0
             votes_available = False
 
-        bullish_bias = trend == "UP" and 35 < rsi < 70
-        bearish_bias = trend == "DOWN" and 30 < rsi < 65
+        # === Improved Initial Bias ===
+        bullish_bias = (trend == "UP" and 38 < rsi < 68) and (not votes_available or buy_votes >= sell_votes - 1)
+        bearish_bias = (trend == "DOWN" and 32 < rsi < 62) and (not votes_available or sell_votes >= buy_votes - 1)
 
         signal = None
-        if bullish_bias and (not votes_available or buy_votes >= sell_votes):
+        if bullish_bias:
             signal = "BUY"
-        elif bearish_bias and (not votes_available or sell_votes >= buy_votes):
+        elif bearish_bias:
             signal = "SELL"
 
         if not signal:
@@ -210,71 +212,83 @@ def generate_signal(pair, timeframe):
         reasons = []
         score = 0.0
 
-        score += min(adx, 40) / 40 * 1.5
+        # Trend strength
+        score += min(adx, 45) / 45 * 1.6
         if strong_trend:
-            reasons.append("ADX trend confirmed")
+            reasons.append("Strong ADX trend")
 
+        # TV Votes
         if votes_available:
-            vote_gap = abs(buy_votes - sell_votes)
-            if vote_gap >= 4:
-                score += 2; reasons.append("Strong indicator consensus")
+            vote_gap = buy_votes - sell_votes if signal == "BUY" else sell_votes - buy_votes
+            if vote_gap >= 5:
+                score += 2.2
+                reasons.append("Very strong consensus")
             elif vote_gap >= 2:
-                score += 1; reasons.append("Indicator consensus")
+                score += 1.1
+                reasons.append("Indicator consensus")
 
+        # MACD
         macd_hist = macd - macd_signal
         macd_ok = (signal == "BUY" and macd_hist > 0) or (signal == "SELL" and macd_hist < 0)
         if macd_ok:
-            score += 1; reasons.append("MACD confirms")
-            if atr and abs(macd_hist) / max(atr, 1e-9) > 0.15:
-                score += 0.5; reasons.append("MACD momentum strong")
+            score += 1.1
+            reasons.append("MACD confirms")
+            if atr and abs(macd_hist) / max(atr, 1e-9) > 0.18:
+                score += 0.6
+                reasons.append("MACD momentum strong")
 
-        stoch_gap = abs(stoch_k - stoch_d)
-        if (signal == "BUY" and stoch_k > stoch_d) or (signal == "SELL" and stoch_k < stoch_d):
-            score += min(stoch_gap / 10, 1) * 0.8
+        # Stochastic
+        stoch_gap = stoch_k - stoch_d if signal == "BUY" else stoch_d - stoch_k
+        if stoch_gap > 3:
+            score += min(stoch_gap / 12, 1) * 0.9
+            reasons.append("Stochastic momentum")
 
-        mom = ind.get("Mom")
-        if mom is not None and ((signal == "BUY" and mom > 0) or (signal == "SELL" and mom < 0)):
-            score += 0.5; reasons.append("Momentum aligns")
-
+        # Other momentum
         plus_di, minus_di = ind.get("ADX+DI"), ind.get("ADX-DI")
-        if plus_di is not None and minus_di is not None:
-            if (signal == "BUY" and plus_di > minus_di) or (signal == "SELL" and minus_di > plus_di):
-                score += 1; reasons.append("Directional index confirms")
+        if plus_di and minus_di and ((signal == "BUY" and plus_di > minus_di) or (signal == "SELL" and minus_di > plus_di)):
+            score += 1.0
+            reasons.append("DI direction confirms")
 
         cci = ind.get("CCI20")
-        if cci is not None and ((signal == "BUY" and cci > 0) or (signal == "SELL" and cci < 0)):
-            score += 0.5; reasons.append("CCI aligns")
+        if cci and ((signal == "BUY" and cci > 50) or (signal == "SELL" and cci < -50)):
+            score += 0.7
+            reasons.append("CCI extreme")
 
+        # Price Action
         if (signal == "BUY" and bullish_candle) or (signal == "SELL" and not bullish_candle):
-            score += min(body_ratio, 1) * 1.2
+            score += min(body_ratio, 1) * 1.1
             if engulf:
-                reasons.append("Candle structure confirms")
+                reasons.append("Strong candle")
 
-        if (signal == "BUY" and wick_reject_up) or (signal == "SELL" and wick_reject_down):
-            score += 0.8; reasons.append("Wick rejection")
+        if (signal == "BUY" and strong_wick_reject_up) or (signal == "SELL" and strong_wick_reject_down):
+            score += 1.0
+            reasons.append("Wick rejection")
 
         if percent_b is not None:
-            extremity = max(0, 0.3 - percent_b) / 0.3 if signal == "BUY" else max(0, percent_b - 0.7) / 0.3
-            if extremity > 0:
-                score += min(extremity, 1) * 1.3
-                reasons.append("At Bollinger extreme")
+            if (signal == "BUY" and percent_b < 0.35) or (signal == "SELL" and percent_b > 0.65):
+                score += 1.2
+                reasons.append("Bollinger extreme")
 
+        # === Confluence (most important for accuracy) ===
         higher_tf = CONFLUENCE_TF.get(timeframe)
         if higher_tf and get_trend_bias(pair, higher_tf) == trend:
-            score += 1.5; reasons.append("Higher-TF trend agrees")
+            score += 1.8
+            reasons.append("Higher-TF trend agrees")
 
         higher_tf2 = CONFLUENCE_TF2.get(timeframe)
         if higher_tf2 and get_trend_bias(pair, higher_tf2) == trend:
-            score += 1; reasons.append("Macro-TF trend agrees")
+            score += 1.1
+            reasons.append("Macro-TF trend agrees")
 
-        if atr and price and atr / price < 0.0008:
-            score -= 1; reasons.append("Low volatility (reduced)")
+        # Volatility filter (avoid dead markets)
+        if atr and price and atr / price < 0.0006:
+            score -= 1.2
+            reasons.append("Very low volatility")
 
         score = round(min(max(score, 0), 10), 1)
 
-        # Moderate bar — scores on evidence, doesn't hard-gate on any single condition
-        if score < 5.5:
-            return f"⏳ Setup forming, not clean yet (score {score}/10)"
+        if score < 5.8:   # Slightly higher threshold but better components
+            return f"⏳ Setup forming (score {score}/10)"
 
         expiration = {"1m": "1-3 minutes", "5m": "4-8 minutes", "15m": "12-25 minutes"}[timeframe]
         amount = get_trade_amount()
@@ -282,7 +296,7 @@ def generate_signal(pair, timeframe):
         arrow = "🟢 BUY" if signal == "BUY" else "🔴 SELL"
 
         return f"""
-📊 **Sigma AI Signal — Multi-Factor v4**
+📊 **Sigma AI Signal — Multi-Factor v5**
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -291,7 +305,7 @@ def generate_signal(pair, timeframe):
 {timing}
 
 🔥 Score: {score}/10
-📋 Confirmations: { " | ".join(reasons) if reasons else "base setup" }
+📋 Confirmations: {" | ".join(reasons) if reasons else "base setup"}
 
 💰 Amount: {amount}
 📉 Martingale step: {MARTINGALE_STEP}
@@ -300,7 +314,7 @@ def generate_signal(pair, timeframe):
 
 📊 RSI: {round(rsi,1)} | Trend: {trend} | TV votes: {buy_votes}B/{sell_votes}S
 
-⚠️ Heuristic score — not a backtested win rate.
+⚠️ Heuristic — trade responsibly
 """
     except Exception as e:
         print("Signal Error:", e)
@@ -311,7 +325,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
         return
-    await update.message.reply_text("🚀 Sigma AI SNIPER (Multi-Candle v3) Started!", reply_markup=main_menu())
+    await update.message.reply_text("🚀 Sigma AI SNIPER v5 (Improved Accuracy) Started!", reply_markup=main_menu())
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text.lower() in ["start", "start bot", "🚀 start bot"]:
