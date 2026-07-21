@@ -74,7 +74,7 @@ async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
     else:
         return
     for user_id in ALLOWED_USERS:
-        await context.bot.send_message(chat_id=user_id, text=f"{session}\n\n💡 Sigma AI Hybrid v5.5 — Balanced Accuracy")
+        await context.bot.send_message(chat_id=user_id, text=f"{session}\n\n💡 Sigma AI Hybrid v5.5 — Fixed & Ready")
 
 def result_buttons():
     return InlineKeyboardMarkup([
@@ -198,7 +198,7 @@ def generate_signal(pair, timeframe):
         if not signal:
             return "⏳ Waiting for setup"
 
-        # Mandatory higher TF (v6 strength)
+        # Mandatory higher TF
         higher_tf = CONFLUENCE_TF.get(timeframe)
         if not (higher_tf and get_trend_bias(pair, higher_tf) == trend):
             return "⏳ Higher TF not aligned"
@@ -209,7 +209,6 @@ def generate_signal(pair, timeframe):
         score += min(adx, 45) / 45 * 1.6
         if adx > 23: reasons.append("Strong ADX")
 
-        # EMA Alignment
         if check_ema_alignment(ind):
             score += 1.3
             reasons.append("EMA stack aligned")
@@ -234,17 +233,18 @@ def generate_signal(pair, timeframe):
         if (signal == "BUY" and bullish_candle) or (signal == "SELL" and not bullish_candle):
             score += min(body_ratio * 1.2, 1.2)
 
-        if (signal == "BUY" and lower_wick := min(open_price, price) - low) > body * 2.0 or
-           (signal == "SELL" and upper_wick := high - max(open_price, price)) > body * 2.0:
+        # Fixed Wick Check
+        lower_wick = min(open_price, price) - low
+        upper_wick = high - max(open_price, price)
+        if (signal == "BUY" and lower_wick > body * 2.0) or (signal == "SELL" and upper_wick > body * 2.0):
             score += 1.0
             reasons.append("Wick rejection")
 
         score = round(min(max(score, 0), 10), 1)
 
-        if score < 5.8:   # Hybrid sweet spot
+        if score < 5.7:
             return f"⏳ Setup forming (score {score}/10)"
 
-        # Signal output
         expiration = {"1m": "1-3 minutes", "5m": "4-8 minutes", "15m": "12-25 minutes"}[timeframe]
         amount = get_trade_amount()
         timing = get_entry_timing(timeframe)
