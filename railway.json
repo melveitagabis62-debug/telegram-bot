@@ -1,21 +1,13 @@
 {
-  "$schema": "https://railway.com/railway.schema.json",
+  "$schema": "https://railway.app/railway.schema.json",
   "build": {
-    "builder": "RAILPACK",
-    "buildEnvironment": "V3"
+    "builder": "NIXPACKS"
   },
-  "deploy": {
-    "runtime": "V2",
-    "numReplicas": 1,
-    "sleepApplication": false,
-    "useLegacyStacker": false,
-    "ipv6EgressEnabled": false,
-    "multiRegionConfig": {
-      "sfo": {
-        "numReplicas": 1
-      }
-    },
-    "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 10
+  "deploy": {},
+  "nixpacksConfig": {
+    "providers": ["python"],
+    "variables": {
+      "PYTHON_VERSION": "3.10"
+    }
   }
 }
