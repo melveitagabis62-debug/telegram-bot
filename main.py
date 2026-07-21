@@ -241,7 +241,7 @@ def generate_signal(pair, timeframe):
 
         score = round(min(max(score, 0), 10), 1)
 
-        if score < 5.7:   # Hybrid sweet spot
+        if score < 5.8:   # Hybrid sweet spot
             return f"⏳ Setup forming (score {score}/10)"
 
         # Signal output
