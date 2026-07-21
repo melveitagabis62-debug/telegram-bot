@@ -234,7 +234,7 @@ def generate_signal(pair, timeframe):
         if (signal == "BUY" and bullish_candle) or (signal == "SELL" and not bullish_candle):
             score += min(body_ratio * 1.2, 1.2)
 
-        if (signal == "BUY" and lower_wick := min(open_price, price) - low) > body * 2.0 or \
+        if (signal == "BUY" and lower_wick := min(open_price, price) - low) > body * 2.0 or
            (signal == "SELL" and upper_wick := high - max(open_price, price)) > body * 2.0:
             score += 1.0
             reasons.append("Wick rejection")
