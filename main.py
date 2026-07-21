@@ -29,6 +29,19 @@ def increase_martingale():
     global MARTINGALE_STEP
     MARTINGALE_STEP += 1
 
+def get_stats():
+    total = WIN + LOSS
+    winrate = round((WIN / total * 100), 1) if total > 0 else 0
+    return f"""
+📊 **Sigma AI Stats**
+
+✅ Wins: {WIN}
+❌ Losses: {LOSS}
+📈 Win Rate: {winrate}%
+🔄 Martingale Step: {MARTINGALE_STEP}
+📊 Total Trades: {total}
+"""
+
 def get_entry_timing(timeframe):
     now = datetime.datetime.utcnow()
     if timeframe == "1m":
@@ -61,7 +74,7 @@ async def session_notifier(context: ContextTypes.DEFAULT_TYPE):
     else:
         return
     for user_id in ALLOWED_USERS:
-        await context.bot.send_message(chat_id=user_id, text=f"{session}\n\n💡 Sigma AI v5 — Enhanced Confluence")
+        await context.bot.send_message(chat_id=user_id, text=f"{session}\n\n💡 Sigma AI Hybrid v5.5 — Balanced Accuracy")
 
 def result_buttons():
     return InlineKeyboardMarkup([
@@ -73,7 +86,11 @@ PAIRS = ["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD","EURJPY"
 CRYPTO_PAIRS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]
 
 def main_menu():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("📊 Forex", callback_data="forex")],[InlineKeyboardButton("💰 Crypto", callback_data="crypto")]])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Forex", callback_data="forex")],
+        [InlineKeyboardButton("💰 Crypto", callback_data="crypto")],
+        [InlineKeyboardButton("📈 Stats", callback_data="stats")]
+    ])
 
 def forex_menu():
     keyboard, row = [], []
@@ -104,24 +121,10 @@ def timeframe_menu(pair):
         [InlineKeyboardButton("⬅️ Back", callback_data="back_forex")]
     ])
 
-# === MULTI-FACTOR ANALYSIS ===
-INTERVAL_MAP = {
-    "1m": Interval.INTERVAL_1_MINUTE,
-    "5m": Interval.INTERVAL_5_MINUTES,
-    "15m": Interval.INTERVAL_15_MINUTES
-}
-
-CONFLUENCE_TF = {
-    "1m": Interval.INTERVAL_5_MINUTES,
-    "5m": Interval.INTERVAL_15_MINUTES,
-    "15m": Interval.INTERVAL_1_HOUR,
-}
-
-CONFLUENCE_TF2 = {
-    "1m": Interval.INTERVAL_15_MINUTES,
-    "5m": Interval.INTERVAL_1_HOUR,
-    "15m": Interval.INTERVAL_4_HOURS,
-}
+# === ANALYSIS ===
+INTERVAL_MAP = {"1m": Interval.INTERVAL_1_MINUTE, "5m": Interval.INTERVAL_5_MINUTES, "15m": Interval.INTERVAL_15_MINUTES}
+CONFLUENCE_TF = {"1m": Interval.INTERVAL_5_MINUTES, "5m": Interval.INTERVAL_15_MINUTES, "15m": Interval.INTERVAL_1_HOUR}
+CONFLUENCE_TF2 = {"1m": Interval.INTERVAL_15_MINUTES, "5m": Interval.INTERVAL_1_HOUR, "15m": Interval.INTERVAL_4_HOURS}
 
 def get_analysis_obj(pair, interval):
     try:
@@ -138,25 +141,30 @@ def get_analysis_obj(pair, interval):
 
 def get_trend_bias(pair, interval):
     analysis = get_analysis_obj(pair, interval)
-    if not analysis:
-        return None
+    if not analysis: return None
     ind = analysis.indicators
     price, ema50 = ind.get("close"), ind.get("EMA50")
-    if price is None or ema50 is None:
-        return None
+    if price is None or ema50 is None: return None
     return "UP" if price > ema50 else "DOWN"
+
+def check_ema_alignment(ind):
+    ema9 = ind.get("EMA9")
+    ema21 = ind.get("EMA21")
+    ema50 = ind.get("EMA50")
+    if None in (ema9, ema21, ema50): return False
+    return (ema9 > ema21 > ema50) or (ema9 < ema21 < ema50)
 
 def generate_signal(pair, timeframe):
     try:
         analysis = get_analysis_obj(pair, INTERVAL_MAP[timeframe])
-        if not analysis:
-            return "❌ Data fetch error"
+        if not analysis: return "❌ Data fetch error"
 
         ind = analysis.indicators
         price = ind.get("close")
         open_price = ind.get("open")
         high = ind.get("high")
         low = ind.get("low")
+
         if None in (price, open_price, high, low):
             return "❌ Incomplete data — try again"
 
@@ -165,138 +173,85 @@ def generate_signal(pair, timeframe):
         macd, macd_signal = ind.get("MACD.macd", 0), ind.get("MACD.signal", 0)
         stoch_k, stoch_d = ind.get("Stoch.K", 50), ind.get("Stoch.D", 50)
         adx = ind.get("ADX", 20)
-        bb_upper, bb_lower = ind.get("BB.upper"), ind.get("BB.lower")
         atr = ind.get("ATR")
 
         trend = "UP" if price > ema50 else "DOWN"
-        strong_trend = adx and adx > 22
 
-        # Candle structure
+        # Candle
         candle_range = max(high - low, 1e-9)
         body = abs(price - open_price)
         body_ratio = body / candle_range
-        upper_wick = high - max(open_price, price)
-        lower_wick = min(open_price, price) - low
         bullish_candle = price > open_price
-        engulf = body_ratio > 0.6
-        strong_wick_reject_up = lower_wick > body * 2.0
-        strong_wick_reject_down = upper_wick > body * 2.0
 
-        percent_b = None
-        if bb_upper and bb_lower and bb_upper != bb_lower:
-            percent_b = (price - bb_lower) / (bb_upper - bb_lower)
-
-        # TradingView summary votes
+        # Votes
         try:
             osc, ma = analysis.oscillators, analysis.moving_averages
             buy_votes = osc.get("BUY", 0) + ma.get("BUY", 0)
             sell_votes = osc.get("SELL", 0) + ma.get("SELL", 0)
-            votes_available = True
         except:
             buy_votes = sell_votes = 0
-            votes_available = False
 
-        # === Improved Initial Bias ===
-        bullish_bias = (trend == "UP" and 38 < rsi < 68) and (not votes_available or buy_votes >= sell_votes - 1)
-        bearish_bias = (trend == "DOWN" and 32 < rsi < 62) and (not votes_available or sell_votes >= buy_votes - 1)
+        bullish_bias = trend == "UP" and 38 < rsi < 67
+        bearish_bias = trend == "DOWN" and 33 < rsi < 62
 
-        signal = None
-        if bullish_bias:
-            signal = "BUY"
-        elif bearish_bias:
-            signal = "SELL"
-
+        signal = "BUY" if bullish_bias else "SELL" if bearish_bias else None
         if not signal:
             return "⏳ Waiting for setup"
+
+        # Mandatory higher TF (v6 strength)
+        higher_tf = CONFLUENCE_TF.get(timeframe)
+        if not (higher_tf and get_trend_bias(pair, higher_tf) == trend):
+            return "⏳ Higher TF not aligned"
 
         reasons = []
         score = 0.0
 
-        # Trend strength
         score += min(adx, 45) / 45 * 1.6
-        if strong_trend:
-            reasons.append("Strong ADX trend")
+        if adx > 23: reasons.append("Strong ADX")
 
-        # TV Votes
-        if votes_available:
-            vote_gap = buy_votes - sell_votes if signal == "BUY" else sell_votes - buy_votes
-            if vote_gap >= 5:
-                score += 2.2
-                reasons.append("Very strong consensus")
-            elif vote_gap >= 2:
-                score += 1.1
-                reasons.append("Indicator consensus")
+        # EMA Alignment
+        if check_ema_alignment(ind):
+            score += 1.3
+            reasons.append("EMA stack aligned")
 
-        # MACD
+        # Momentum
         macd_hist = macd - macd_signal
-        macd_ok = (signal == "BUY" and macd_hist > 0) or (signal == "SELL" and macd_hist < 0)
-        if macd_ok:
-            score += 1.1
+        if ((signal == "BUY" and macd_hist > 0) or (signal == "SELL" and macd_hist < 0)):
+            score += 1.2
             reasons.append("MACD confirms")
-            if atr and abs(macd_hist) / max(atr, 1e-9) > 0.18:
-                score += 0.6
-                reasons.append("MACD momentum strong")
 
-        # Stochastic
-        stoch_gap = stoch_k - stoch_d if signal == "BUY" else stoch_d - stoch_k
-        if stoch_gap > 3:
-            score += min(stoch_gap / 12, 1) * 0.9
+        if ((signal == "BUY" and stoch_k > stoch_d) or (signal == "SELL" and stoch_k < stoch_d)):
+            score += 0.9
             reasons.append("Stochastic momentum")
 
-        # Other momentum
-        plus_di, minus_di = ind.get("ADX+DI"), ind.get("ADX-DI")
-        if plus_di and minus_di and ((signal == "BUY" and plus_di > minus_di) or (signal == "SELL" and minus_di > plus_di)):
-            score += 1.0
-            reasons.append("DI direction confirms")
-
-        cci = ind.get("CCI20")
-        if cci and ((signal == "BUY" and cci > 50) or (signal == "SELL" and cci < -50)):
-            score += 0.7
-            reasons.append("CCI extreme")
+        # Votes
+        vote_gap = abs(buy_votes - sell_votes)
+        if vote_gap >= 4:
+            score += 2.0
+            reasons.append("Strong consensus")
 
         # Price Action
         if (signal == "BUY" and bullish_candle) or (signal == "SELL" and not bullish_candle):
-            score += min(body_ratio, 1) * 1.1
-            if engulf:
-                reasons.append("Strong candle")
+            score += min(body_ratio * 1.2, 1.2)
 
-        if (signal == "BUY" and strong_wick_reject_up) or (signal == "SELL" and strong_wick_reject_down):
+        if (signal == "BUY" and lower_wick := min(open_price, price) - low) > body * 2.0 or \
+           (signal == "SELL" and upper_wick := high - max(open_price, price)) > body * 2.0:
             score += 1.0
             reasons.append("Wick rejection")
 
-        if percent_b is not None:
-            if (signal == "BUY" and percent_b < 0.35) or (signal == "SELL" and percent_b > 0.65):
-                score += 1.2
-                reasons.append("Bollinger extreme")
-
-        # === Confluence (most important for accuracy) ===
-        higher_tf = CONFLUENCE_TF.get(timeframe)
-        if higher_tf and get_trend_bias(pair, higher_tf) == trend:
-            score += 1.8
-            reasons.append("Higher-TF trend agrees")
-
-        higher_tf2 = CONFLUENCE_TF2.get(timeframe)
-        if higher_tf2 and get_trend_bias(pair, higher_tf2) == trend:
-            score += 1.1
-            reasons.append("Macro-TF trend agrees")
-
-        # Volatility filter (avoid dead markets)
-        if atr and price and atr / price < 0.0006:
-            score -= 1.2
-            reasons.append("Very low volatility")
-
         score = round(min(max(score, 0), 10), 1)
 
-        if score < 5.8:   # Slightly higher threshold but better components
+        if score < 5.7:   # Hybrid sweet spot
             return f"⏳ Setup forming (score {score}/10)"
 
+        # Signal output
         expiration = {"1m": "1-3 minutes", "5m": "4-8 minutes", "15m": "12-25 minutes"}[timeframe]
         amount = get_trade_amount()
         timing = get_entry_timing(timeframe)
         arrow = "🟢 BUY" if signal == "BUY" else "🔴 SELL"
 
         return f"""
-📊 **Sigma AI Signal — Multi-Factor v5**
+📊 **Sigma AI Hybrid v5.5**
 
 💱 Pair: {pair}
 ⏱ TF: {timeframe}
@@ -308,28 +263,22 @@ def generate_signal(pair, timeframe):
 📋 Confirmations: {" | ".join(reasons) if reasons else "base setup"}
 
 💰 Amount: {amount}
-📉 Martingale step: {MARTINGALE_STEP}
+📉 Martingale: {MARTINGALE_STEP}
 
 ⏳ Expiration: {expiration}
 
-📊 RSI: {round(rsi,1)} | Trend: {trend} | TV votes: {buy_votes}B/{sell_votes}S
-
-⚠️ Heuristic — trade responsibly
+📊 RSI: {round(rsi,1)} | Trend: {trend} | Votes: {buy_votes}B/{sell_votes}S
 """
     except Exception as e:
         print("Signal Error:", e)
         return "❌ Data error — try again"
 
-# === Bot Setup ===
+# === Handlers ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Not authorized")
         return
-    await update.message.reply_text("🚀 Sigma AI SNIPER v5 (Improved Accuracy) Started!", reply_markup=main_menu())
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text.lower() in ["start", "start bot", "🚀 start bot"]:
-        await start(update, context)
+    await update.message.reply_text("🚀 Sigma AI Hybrid v5.5 Started!\nBalanced Accuracy Mode", reply_markup=main_menu())
 
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global WIN, LOSS
@@ -345,7 +294,8 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         LOSS += 1
         increase_martingale()
         await query.edit_message_text(f"❌ LOSS\nWins: {WIN}\nLosses: {LOSS}\nMartingale: {MARTINGALE_STEP}")
-
+    elif data == "stats":
+        await query.edit_message_text(get_stats(), reply_markup=main_menu())
     elif data == "forex":
         await query.edit_message_text("Choose Forex:", reply_markup=forex_menu())
     elif data == "crypto":
@@ -364,10 +314,16 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = generate_signal(pair, tf)
         await query.edit_message_text(result, parse_mode="Markdown", reply_markup=result_buttons())
 
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text.lower() in ["start", "start bot", "🚀 start bot"]:
+        await start(update, context)
+
+# === Bot Setup ===
 app = ApplicationBuilder().token(TOKEN).build()
-app.job_queue.run_repeating(session_notifier, interval=1200, first=10)
+app.job_queue.run_repeating(session_notifier, interval=3000, first=10)
 
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("stats", lambda u, c: u.message.reply_text(get_stats(), reply_markup=main_menu())))
 app.add_handler(CallbackQueryHandler(handle_buttons))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
